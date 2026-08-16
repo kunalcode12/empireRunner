@@ -18,8 +18,8 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 |---|---|---|---|---|
 | **P01** | Foundation & toolchain | Move `app/` → `src/app/`, update `tsconfig` paths, create the `src/game/**` + `src/ui/**` tree, `config/tuning.ts` from TUNING.md, ESLint import boundaries, vitest + playwright, npm scripts | `npm run typecheck && npm run lint && npm run test && npm run build` all pass; tuning-invariant tests green; boundary rule rejects a deliberate `three` import in `sim/` | **Complete** |
 | **P02** | Deterministic sim core | Fixed-timestep loop, accumulator, snapshot buffer, seeded PRNG, `SimState`, object pools, replay record/playback + hash | Same seed + log run twice → identical hash; 30/60/144Hz render rates → identical result; 0-byte heap delta over 10k ticks; tick < 2.0ms | **Complete** |
-| **P03** | Input layer | keyboard / touch / gamepad → normalised intent stream; input buffer, coyote time, stick hysteresis, two-finger roll gesture | Unit tests for buffer + coyote windows; a real device playtest of the two-finger roll (GAME_BIBLE §13 Q2 answered) | Not started |
-| **P04** | Player controller | 12-position face/lane state machine, jump/slide/lane/roll, asymmetric gravity, swept AABB collision, roll commit lock | Headless: all 6 verbs produce the exact durations in TUNING.md; `newLane === 2 - oldLane` across rolls; no tunnelling at `maxSpeed` | Not started |
+| **P03** | Input layer | keyboard / touch / gamepad → normalised intent stream; input buffer, coyote time, stick hysteresis, two-finger roll gesture | Unit tests for buffer + coyote windows; a real device playtest of the two-finger roll (GAME_BIBLE §13 Q2 answered) | **Complete (code) · gate PARTIAL** |
+| **P04** | Player controller | 12-position face/lane state machine, jump/slide/lane/roll, asymmetric gravity, swept AABB collision, roll commit lock | Headless: all 6 verbs produce the exact durations in TUNING.md; `newLane === 2 - oldLane` across rolls; no tunnelling at `maxSpeed` | **Complete** |
 | **P05** | Render bridge & camera | r3f canvas, `dynamic(ssr:false)` mount, four-face prism geometry, runner mesh, snapshot interpolation, camera rig, r3f-perf, leva | Game boots and runs at 60fps; `< 100` draw calls desktop, `< 50` mobile; roll reads correctly and the reduced-motion path works | Not started |
 | **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | Not started |
 | **P07** | Entity catalogue | All 12 obstacles, 4 hazards, 7 pickups; instanced + pooled rendering; collision resolution; near-miss detection | Every entity in GAME_BIBLE §7 spawns, renders, and is defeated by exactly its listed verbs; near-miss fires at 0.45u surface-to-surface | Not started |
@@ -36,9 +36,214 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 gate fails, then return to the phase that failed) and the final hardening pass. It is the only
 phase that may legitimately run more than once.
 
+**P03 note.** The input layer was delivered as part of the P04 prompt, which scoped
+`src/game/input/**` alongside the player controller. All of P03's code shipped and its unit
+tests pass (31 tests). Its gate is marked **PARTIAL** because the other half —
+*"a real device playtest of the two-finger roll"* — has not been run and cannot be run
+headlessly. **GAME_BIBLE §13 Q2 (portrait vs landscape) is still unanswered.** Do not treat
+the touch layer as validated until someone puts a thumb on it.
+
 ---
 
 ## Build log
+
+### 2026-08-16 — P04b · Hardening pass — **Complete**
+
+Ran between P04 and P05 to clear every issue flagged as open across P02-P04, plus three
+real bugs found by auditing rather than by a failing test.
+
+**Verify gate**
+
+```
+npm run typecheck && npm run lint && npm run test
+
+> tsc --noEmit         (clean)
+> eslint .             (clean, 0 errors 0 warnings)
+> vitest run           Test Files 17 passed | Tests 394 passed (was 377)
+```
+
+**Three real bugs, all of which passed every existing test**
+
+1. **Coyote time was completely dead.** `beginCoyote` existed, was exported, and had six
+   passing unit tests — and **nothing in the controller ever called it**. Worse, fixing that
+   was only half the job: the transition table had no `FALLING --JumpStart--> JUMPING` edge,
+   so even once armed, a coyote jump was rejected and buffered. Coyote time is a LOCKED
+   tuning value that did nothing whatsoever. Both halves fixed; the edge is now in the table
+   with its guard documented.
+2. **`Edge.LeaveGround` was unreachable.** The transition table advertised walking off a
+   ledge; no code path produced it. Now exported as `leaveGround()` — armed automatically
+   when support is lost, and the entry point P07's Void Gap logic will call.
+3. **A fatal hit never ended the run.** Only `player.phase` became `Crashed`; `runStatus`
+   stayed `Running`, so `sim.tick` kept going — the world scrolled, `distance` accumulated,
+   and **a dead player went on scoring forever**. `endRun()` now sets `RunStatus.Ended` and
+   emits `RunEnd`. Tests pin that distance, tick count and state hash all freeze at death.
+
+**Previously-flagged issues, now closed**
+
+- **Transcendental lint ban is in.** `Math.exp/log/pow/sin/cos/tan/atan2/cbrt/hypot` and
+  friends are rejected inside `src/game/sim/`; `Math.sqrt` stays legal because IEEE-754
+  specifies it exactly. Verified by planting a violation: 3 errors, `sqrt` untouched. This
+  was raised at P02 and P04 and is the oldest risk in the repo — now enforced rather than
+  hoped for.
+- **Layering rule fixed for subdirectories.** The old regex `^\.\./(?!config/)` assumed
+  every sim file sat directly in `src/game/sim/` and rejected a subdirectory's legitimate
+  `../state`. The new pattern allows a sim sibling or `../../config/`, still catching
+  `../render/` and `../../ui/`. Verified against a probe file.
+- **`--expose-gc` wired into vitest** (`test.execArgv`, a top-level option in Vitest 4, not
+  `poolOptions`). The retained-memory test **no longer skips**: it now measures
+  **−104,280 bytes across 10,000 ticks**. Law (d) is verified rather than aspirational.
+- **GAME_BIBLE updated** so the bible and the code agree: STUMBLE is documented as §12.1 with
+  its numbers and its rationale, corner forgiveness is in §6.4, and the fast-drop has its own
+  §6.5 explaining why it is undocumented *in-game* but documented *here*. Variable jump
+  height added to the verb table.
+- **P03's phase-table status corrected.** Its code shipped inside the P04 prompt; the row now
+  reads `Complete (code) · gate PARTIAL` with a note that the device playtest is outstanding.
+
+**Also**
+
+- The roll now sets `Verb.RollLeft` / `Verb.RollRight` so the HUD can read it.
+- `fellOutOfWorld` is checked before `Apex`, and routes through `Apex` first when the player
+  is still in `JUMPING`, so it can never attempt an illegal edge.
+
+**Still open — deliberately**
+
+- **The two-finger roll has still not been playtested on hardware**, and GAME_BIBLE §13 Q2
+  (portrait vs landscape) is still unanswered. Not fixable from here.
+- **Coyote time cannot be exercised end to end** until Void Gaps exist: `stepVertical` treats
+  the floor as unconditionally present at `y = 0`, so a player who loses support re-lands the
+  same tick. The wiring and the decision path are tested; the *trigger* arrives at P06/P07.
+  This is called out in a comment block in `ground-and-death.test.ts` rather than papered over.
+- Per-entity collider extents and the real STUMBLE/FATAL classification are still P07.
+
+---
+
+### 2026-08-16 — P04 · Player controller & collision — **Complete**
+
+**Verify gate — all green**
+
+```
+npm run typecheck && npm run test
+
+> tsc --noEmit                    (clean)
+> eslint .                        (clean, 0 errors 0 warnings — run alongside)
+> vitest run
+  Test Files  16 passed (16)
+       Tests  377 passed (377)
+    Duration  4.19s
+```
+
+**State hash and tick timing** (Node v24.13.0, Windows 11):
+
+```
+30s scripted-log state hash : 0x29ae5fa5   (identical across 100 runs)
+  final phase/face/lane     : 3 (SLIDING) / face 0 / lane 1
+  distance                  : 428.44 m
+10,000 ticks (idle)         : 7.09ms | 0.709us/tick
+10,000 ticks (full input)   : 8.04ms | 0.804us/tick
+realtime multiple           : 20,737x
+```
+
+Driving all six verbs costs **0.095us/tick** more than idling — the controller is
+essentially free next to the per-tick snapshot copy.
+
+**Shipped**
+
+- **`player/phase.ts`** — the 8-phase machine as a frozen data table, with the full
+  transition table in the header. Illegal transitions throw in dev, no-op in prod.
+  `phase.test.ts` walks all 8 x 16 = 128 pairs and asserts exactly 32 are legal.
+- **`player/facing.ts`** — the `(face, lane, direction)` transform, pure and isolated.
+  All 24 cases written out by hand rather than generated, so a wrong expectation shows in
+  the diff instead of being computed by the same rule the code uses.
+- **`player/locomotion.ts`** — lane tween (ease-out cubic, interruptible by reverse, not by
+  a roll), jump solved from `jumpApexTime`/`jumpApexHeight` with asymmetric gravity,
+  variable height via release-edge cut, slide, and the concurrent roll.
+- **`player/forgiveness.ts`** — coyote time, one-slot input buffer, both aged at the END of
+  the step so a window gets its full stated duration.
+- **`player/collider.ts`** — phase-dependent AABB. Airborne deliberately reuses the standing
+  box; inventing a smaller one would be a gameplay change smuggled in as an implementation detail.
+- **`player/timer.ts`** — epsilon-snapped countdowns. See finding 3.
+- **`collision.ts`** — swept AABB with a slab solve, FATAL/STUMBLE/PASS classification,
+  corner forgiveness, and near-miss at 0.45u surface-to-surface awarded once per instance.
+- **`src/game/input/`** — keyboard, touch and gamepad normalising to one intent stream.
+  Touch fires **on threshold crossing, not touchend**, with a diagonal dead zone that
+  discards ambiguous swipes rather than guessing. Gamepad uses a real hysteresis band.
+- **377 tests**, up from 181.
+
+**Four real findings**
+
+1. **The dev-mode guard caught a hole in my own transition table.** The fast-drop slams
+   `vy` to -28 u/s, so the player can reach the floor on the very next tick **while still in
+   JUMPING** — the `Apex` edge never fires. `JUMPING --Land-->` and `JUMPING --LandIntoSlide-->`
+   were missing. Added, with the reachability explained in the table. This is exactly what an
+   exhaustive machine is for, and it paid for itself within an hour.
+2. **A sign error in the swept-AABB slab solve.** I had `t = (centreDelta ± extentSum) / motion`;
+   solving `|centreDelta + motion·t| < extentSum` actually gives `t = (−centreDelta ± extentSum) / motion`.
+   It returned the right answer for already-overlapping boxes, so several tests passed —
+   the thin-obstacle test at `maxSpeed` is what exposed it. **Every obstacle thinner than
+   0.567u would have been tunnelled through.**
+3. **Every timer ran one tick long.** `fixedDelta` is `1/60`, which is not exactly
+   representable: `6 × (1/60) = 0.09999999999999999`, leaving `1.4e-17` on a 0.10s window and
+   a naive `> 0` check keeping it open for a seventh tick. That is a **16% error on
+   `coyoteTime`** and the kind of drift that makes playtest tuning impossible. Fixed centrally
+   in `player/timer.ts` with an epsilon snap; `coyoteTime` is now exactly 6 ticks, the slide
+   exactly 33, the roll exactly 18.
+4. **The P01 layering lint rule has a false positive.** Its regex `^\.\./(?!config/)` assumed
+   sim files sit directly in `src/game/sim/`, so a subdirectory's legitimate `../state` and
+   `../../config/tuning` are rejected. `player/**` uses the `@/` alias instead, which the
+   rule's group patterns explicitly permit for those two targets — legal, not an evasion,
+   and `@/game/render` is still caught. **The rule itself is still wrong** and will bite the
+   next subdirectory; see below.
+
+**Both P02 canaries flipped, as designed**
+
+- `replay.test.ts` "rejects a tampered input log" now asserts **rejection**. With input live,
+  one flipped lateral bit 300 ticks from the end diverges the run. **The anti-cheat is fully
+  closed as of this phase.**
+- `determinism.test.ts` "different input logs give different hashes" now asserts they
+  **differ**. Added a companion test pinning the honest corollary: a *completed* jump leaves
+  no residue, so runs differing only by a finished jump legitimately reconverge — and since
+  the server recomputes the score rather than reading one, a hash-neutral edit is also
+  score-neutral and gains an attacker nothing.
+
+**Deliberately deferred / not done**
+
+- **The two-finger roll gesture has NOT been playtested on hardware.** PROGRESS.md sets that
+  as half of P04's gate and I cannot run it. The recognizer is unit-tested headless
+  (31 tests) but `twoFingerTolerance` at 80ms is still an untested guess on real thumbs.
+  **GAME_BIBLE §13 Q2 (portrait vs landscape) remains unanswered.**
+- **GAME_BIBLE was not updated** (doc scope not approved). STUMBLE, corner forgiveness and
+  the fast-drop are implemented and tuned but appear in **neither** §7 nor §12. The bible and
+  the code disagree today. TUNING.md §6 was corrected to `easeOutCubic` since that was
+  explicitly approved.
+- **Per-entity collider extents do not exist.** `collision.ts` uses a single 0.5u half-extent
+  for every obstacle; the real dimensions arrive with `config/entities.ts` at P07. The
+  thin-obstacle tunnelling test therefore drives `sweptOverlap` directly.
+- `classifyContact` is a placeholder (odd kinds stumble, even kinds kill) so both branches are
+  reachable. **Not a design** — P07 replaces it.
+- Nothing spawns obstacles yet (generator is a P06 stub), so collision runs against an empty
+  array in real play and the tests construct entities by hand.
+
+**Known issues**
+
+- **The transcendental lint ban is still not in place** (proposed at P02 and P04, not
+  approved). P04 added easing and gravity maths and I kept everything to exact IEEE-754 ops
+  by hand. Nothing enforces that for P05-P08. This is now the oldest open risk in the repo.
+- The layering rule's relative-path regex is wrong for subdirectories (finding 4). Fix:
+  allow `^\.\./` when the resolved path stays inside `src/game/sim/` or `src/game/config/`.
+- `--expose-gc` still unwired, so the retained-memory test still skips.
+- Dev-throw / prod-ignore means a replay hitting an illegal edge would crash a dev-mode
+  server while a prod client sails past. Deliberate — a determinism bug should be loud where
+  it can be fixed — but the guard must never become load-bearing gameplay logic.
+
+**What P05 needs**
+
+- Approval for the two lint fixes above.
+- The render bridge reads `previous`/`current` and lerps by `alpha`; rotations use the roll
+  angle in `F.playerRoll`, which is folded back to zero on completion so it never accumulates.
+- `rollCameraLerp` (0.85) and GAME_BIBLE §13 Q1 (camera rolls vs world rolls) need the device
+  playtest that P04 could not run.
+
+---
 
 ### 2026-08-16 — P02 · Deterministic sim core — **Complete**
 

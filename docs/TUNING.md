@@ -118,8 +118,8 @@ This is why obstacle spacing (§10) is expressed in **seconds of separation, not
 | `slideDuration` | s | **0.55** | 0.40 – 0.80 | 🔒 | The slide ends under the bar and the player stands up into it. Reads as a broken hitbox even though it is a timing failure. | Slide becomes a free crouch-walk; the player spams it, and low bars stop being a distinct threat. |
 | `slideRecovery` | s | **0.08** | 0.0 – 0.2 | ⚙️ | No commitment; slide-cancel spam. | Standing up feels sticky and chains into the next obstacle badly. Lane change **is** permitted during a slide; jump is not until recovery ends. |
 | `perfectSlideMargin` | s | **0.12** | 0.05 – 0.25 | ⚙️ | "Perfect" is unhittable and the Flow source dries up. | Every slide is perfect, the bonus stops meaning anything, and Flow inflates. |
-| `lowBarClearance` | u | **1.05** | 0.9 – 1.3 | ⚙️ | Below 0.95 nothing clears it — `playerHeightSlide` is 0.70u and needs margin. | Above 1.3 a standing player nearly fits and the slide stops being required. |
-| `highGateClearance` | u | **1.40** | 1.2 – 1.6 | ⚙️ | A standing player (1.60u) would clear it without jumping. | Approaches `jumpApexHeight` 1.75u and the jump margin (0.35u) vanishes. |
+| `lowBarClearance` | u | **1.05** | 0.9 – 1.3 | ⚙️ | **UNDERSIDE height** of a Low Bar, which hangs from the ceiling. Below 0.95 nothing clears it — `playerHeightSlide` is 0.70u and needs margin. | Above 1.3 a standing player nearly fits and the slide stops being required. |
+| `highGateClearance` | u | **1.40** | 1.2 – 1.6 | ⚙️ | **TOP height** of a High Gate, which stands on the floor. (Corrected at P06: this was mislabelled "underside", which inverted the entity and would have made the level solver validate against the wrong geometry.) Below 1.2u the jump becomes trivial and the gate stops being a real gate. | Approaches `jumpApexHeight` 1.75u and the jump margin (0.35u) vanishes. |
 
 ---
 
@@ -128,7 +128,7 @@ This is why obstacle spacing (§10) is expressed in **seconds of separation, not
 | Key | Unit | Default | Range | Status | Too low | Too high |
 |---|---|---|---|---|---|---|
 | `laneChangeDuration` | s | **0.14** | 0.08 – 0.25 | 🔒 | Teleporting. The player arrives before the eye tracks the move, and near-misses stop being legible. | Sluggish. At 28 u/s a 0.25s lane change travels 7u forward, so the player is committed for a third of a jump's footprint and dodging late becomes impossible. |
-| `laneChangeEasing` | — | `easeOutQuad` | — | ⚙️ | Linear reads mechanical and cheap. | Heavy ease-in-out makes the move feel like it has weight it should not have. The runner is agile, not heavy. |
+| `laneChangeEasing` | — | **`easeOutCubic`** | — | ⚙️ | Linear reads mechanical and cheap. | Heavy ease-in-out makes the move feel like it has weight it should not have. The runner is agile, not heavy. **Changed from `easeOutQuad` at P04:** cubic decelerates harder into the settle, which reads as decisive rather than drifting over a 0.14s move. Implemented as an explicit polynomial (`1 - u*u*u`), never `Math.pow` — see the determinism note in §1b. |
 | `laneQueueDepth` | count | **1** | 0 – 2 | ⚙️ | 0 means a double-tap to cross two lanes drops the second input, which players read as a missed press. | 2+ lets a panic mash carry the player across the whole face uncontrollably. |
 
 ---

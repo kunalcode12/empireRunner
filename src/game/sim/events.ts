@@ -67,6 +67,20 @@ export const SimEvent = {
   BandChange: 20,
   /** Flow crossed 100 and Overdrive armed. */
   FlowFull: 21,
+
+  // ── P04 — player controller ────────────────────────────────────────────────
+  /** Non-fatal contact. Speed penalty + recovery window. payload0 = stumble count. */
+  Stumble: 22,
+  /** Recovered from a stumble; control returned. */
+  StumbleEnd: 23,
+  /**
+   * A clip of under `cornerForgiveness` was nudged clear instead of killing.
+   *
+   * Emitted so the rate can be MEASURED. This is a deliberately invisible
+   * mechanic, and an invisible mechanic with no telemetry is one nobody can tune.
+   * payload0 = penetration depth, payload1 = obstacle index.
+   */
+  CornerForgive: 24,
 } as const;
 export type SimEventValue = (typeof SimEvent)[keyof typeof SimEvent];
 

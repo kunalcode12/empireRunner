@@ -74,7 +74,45 @@ describe("determinism: same seed + same input log", () => {
 
   it("different input logs give different hashes", () => {
     // Guards against a hash that ignores input entirely, which would make the
-    // whole anti-cheat vacuous.
+    // whole anti-cheat vacuous. Was a canary through P02, when the controller
+    // was stubbed and this asserted the opposite.
+    const a = createSim(RUN_SEED);
+    const b = createSim(RUN_SEED);
+    const idle = createIntent();
+    const jumping: Intent = { lateral: 0, roll: 0, jump: true, slide: false };
+
+    for (let i = 0; i < 20; i += 1) {
+      a.tick(idle);
+      b.tick(jumping);
+    }
+
+    expect(a.hash()).not.toBe(b.hash());
+  });
+
+  it("a lane change diverges the hash permanently", () => {
+    // Unlike a jump, a lane change leaves the player somewhere else, so the
+    // divergence never heals.
+    const a = createSim(RUN_SEED);
+    const b = createSim(RUN_SEED);
+    const idle = createIntent();
+    const right: Intent = { lateral: 1, roll: 0, jump: false, slide: false };
+
+    b.tick(right);
+    a.tick(idle);
+    for (let i = 0; i < 300; i += 1) {
+      a.tick(idle);
+      b.tick(idle);
+    }
+
+    expect(a.hash()).not.toBe(b.hash());
+    expect(a.getState().player.lane).not.toBe(b.getState().player.lane);
+  });
+
+  it("a COMPLETED jump leaves no residue, so the hashes reconverge", () => {
+    // Worth pinning explicitly: this is correct, not a bug. Every timer returns
+    // to zero and y returns to the floor, so two runs that differed only by a
+    // finished jump are genuinely in the same state afterwards. It is also why
+    // the divergence test above samples mid-jump rather than long after.
     const a = createSim(RUN_SEED);
     const b = createSim(RUN_SEED);
     const idle = createIntent();
@@ -82,12 +120,10 @@ describe("determinism: same seed + same input log", () => {
 
     for (let i = 0; i < 100; i += 1) {
       a.tick(idle);
-      b.tick(i === 50 ? jumping : idle);
+      b.tick(i === 10 ? jumping : idle);
     }
 
-    // NOTE: the player controller is a P04 stub, so input currently changes
-    // nothing and these SHOULD match today. This test asserts the current
-    // truth and is the canary for P04 wiring input through.
+    expect(b.getState().player.grounded).toBe(1);
     expect(a.hash()).toBe(b.hash());
   });
 

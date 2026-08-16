@@ -46,6 +46,7 @@ import {
   copyState,
   createState,
   F,
+  Phase,
   resetState,
   RunStatus,
   type RngSeeds,
@@ -60,6 +61,7 @@ const MAX_SPEED = TUNING.speed.maxSpeed;
 const FLOW_SPEED_BONUS = TUNING.speed.flowSpeedBonus;
 const FLOW_MAX = TUNING.flow.flowMax;
 const BANDS = TUNING.spawn.bands;
+const STUMBLE_SPEED_PENALTY = TUNING.collision.stumbleSpeedPenalty;
 
 export interface Sim {
   /** Advances exactly one fixed timestep. */
@@ -162,7 +164,13 @@ export function createSim(seed: number): Sim {
 
     const flowBonus = FLOW_SPEED_BONUS * ((f[F.flow] ?? 0) / FLOW_MAX);
     const target = nextTimeSpeed + flowBonus;
-    const worldSpeed = target > MAX_SPEED ? MAX_SPEED : target;
+    const capped = target > MAX_SPEED ? MAX_SPEED : target;
+
+    // A stumble is a setback, not a death: the world slows while the player
+    // recovers. Applied after the clamp so the penalty is always felt, even at
+    // maxSpeed where the clamp would otherwise absorb it.
+    const worldSpeed =
+      state.player.phase === Phase.Stumbling ? capped * STUMBLE_SPEED_PENALTY : capped;
     f[F.worldSpeed] = worldSpeed;
 
     f[F.distance] = (f[F.distance] ?? 0) + worldSpeed * FIXED_DELTA;

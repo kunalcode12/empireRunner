@@ -141,9 +141,15 @@ export const TUNING = {
   // ───────────────────────────────────────────────────────────────────────────
   replay: {
     /** Format version written into every replay header. Bump on ANY change to
-     *  the header layout, the intent bit packing, or the tick order in sim.ts.
-     *  A replay whose version does not match is rejected, never re-scored. */
-    formatVersion: 1,
+     *  the header layout, the intent bit packing, the tick order in sim.ts, or
+     *  the meaning of a recorded intent. A replay whose version does not match is
+     *  rejected, never re-scored.
+     *
+     *  v2 (P04): the player controller landed. Intents that were inert under v1
+     *  now move the player, and `jump`/`slide` changed meaning from "pressed" to
+     *  "held" so variable jump height can read the release edge. Every v1 replay
+     *  would re-simulate to a different result and is therefore rejected. */
+    formatVersion: 2,
 
     /** bytes — fixed header size. magic(4) version(1) flags(1) tickRate(2)
      *  seed(4) tickCount(4) finalHash(4). DERIVED from the layout in replay.ts. */
@@ -223,6 +229,23 @@ export const TUNING = {
     fallTime: FALL_TIME_S,
     /** s — total airborne time. DERIVED. */
     airTime: JUMP_APEX_TIME_S + FALL_TIME_S,
+
+    /** x — upward velocity is multiplied by this when JUMP is released while still
+     *  rising. Variable jump height: a tap is a short hop, a hold is a full arc.
+     *  This is the single cheapest thing that makes a jump feel authored rather
+     *  than scripted. OPEN. */
+    jumpReleaseCut: 0.5,
+
+    /** u/s — downward velocity forced by pressing SLIDE while airborne.
+     *
+     *  An intentionally undocumented advanced technique: a dive to the ground that
+     *  cuts airtime short and lands straight into a slide. New players never find
+     *  it; expert players use it to recover from a mistimed jump. It is deliberately
+     *  absent from the tutorial and the verb list in GAME_BIBLE §6.
+     *
+     *  Must exceed maxSpeed so the dive reads as decisive rather than a soft drift.
+     *  OPEN. */
+    fastDropSpeed: 28.0,
   },
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -438,6 +461,100 @@ export const TUNING = {
         fullFaceWallChance: 0.18,
       },
     ],
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 12b. Collision and forgiveness — P04
+  //
+  // NOTE: STUMBLE, corner forgiveness and the mid-air fast-drop are mechanics
+  // introduced at P04. They are NOT yet described in docs/GAME_BIBLE.md §7 or
+  // §12 — that doc update was proposed and not approved, so the bible and the
+  // code currently disagree. See the P04 entry in PROGRESS.md.
+  // ───────────────────────────────────────────────────────────────────────────
+  collision: {
+    /** u — penetration depth at or under which a clip into an obstacle EDGE nudges
+     *  the player clear instead of killing them.
+     *
+     *  This is invisible to players and is the difference between "tight" and
+     *  "this game cheats me". At maxSpeed the player advances 0.57u per tick, so
+     *  0.12u is roughly a fifth of a tick of overlap — genuinely a graze, not a
+     *  hit the player could have seen. Emitted as a distinct event so the rate can
+     *  be measured; if it fires often, the generator is placing unfair geometry
+     *  rather than the forgiveness being too generous. OPEN. */
+    cornerForgiveness: 0.12,
+
+    /** x — worldSpeed multiplier applied for the duration of a stumble. OPEN. */
+    stumbleSpeedPenalty: 0.55,
+
+    /** s — how long a stumble lasts before control returns. Must stay under the
+     *  time it takes the next obstacle to arrive at band-5 density, or a stumble
+     *  becomes an unavoidable death rather than a setback. OPEN. */
+    stumbleRecovery: 0.7,
+
+    /** s — invulnerability granted while recovering from a stumble, so a single
+     *  bad cluster cannot chain-stumble the player into a wall. OPEN. */
+    stumbleInvulnerability: 0.35,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 12c. Level generation — P06
+  //
+  // The architecture is a hybrid: a pool of hand-authored 24u chunks selected by
+  // a difficulty-banded grammar and placed on a fixed grid. Pure procedural
+  // generation produces track that is technically fair and completely
+  // characterless; pure authoring runs out after ten minutes. The grammar is
+  // what buys both.
+  // ───────────────────────────────────────────────────────────────────────────
+  level: {
+    /** chunks — how many are kept live ahead of the player.
+     *  liveTrackLength 240u / chunkLength 24u = 10. DERIVED. */
+    windowChunks: LIVE_TRACK_LENGTH_U / 24,
+
+    /** picks — a chunk cannot be selected again within this many selections.
+     *
+     *  The single cheapest defence against "I have seen this before". With ~6
+     *  chunks per tier, a window of 5 means a tier's rotation is nearly a full
+     *  shuffle before anything repeats. Raising it past the tier population
+     *  makes selection fail and fall back, so it is clamped at runtime. OPEN. */
+    recencyWindow: 5,
+
+    /** difficulty — at or above this, a chunk counts as "hard" for the breather rule. */
+    hardDifficulty: 4,
+
+    /** count — never more than this many consecutive hard chunks before a
+     *  breather is forced in.
+     *
+     *  Pacing is not decoration. An unbroken wall of difficulty reads as noise
+     *  rather than as escalation, and the player never gets the beat of relief
+     *  that makes the next hard section land. OPEN. */
+    maxConsecutiveHard: 3,
+
+    /** tiers — how much a full Flow meter shifts the difficulty band upward.
+     *
+     *  This is the self-escalation loop reaching the generator: a player at 100
+     *  Flow is not just moving faster, they are being handed harder track.
+     *
+     *  NOTE: this is an ADDITION to the design in GAME_BIBLE §4.2, which couples
+     *  Flow to speed and multiplier only. Introduced at P06. OPEN. */
+    flowDifficultyBonus: 1,
+
+    /** ticks — minimum solver slack before a chunk is flagged as inhuman.
+     *
+     *  Slack is how many ticks the player can be frozen on entry and still
+     *  survive. A chunk that is survivable only with a frame-perfect input is
+     *  technically fair and practically a cheat. 3 ticks is 50ms. OPEN. */
+    minSolverSlackTicks: 3,
+
+    /** m — distances at which the run crosses into a new theme. Each is followed
+     *  by a `transitionLength` stretch of guaranteed-empty track.
+     *  From GAME_BIBLE §10.1. */
+    themeMilestones: [1200, 2800, 5000],
+
+    /** m — length of the obstacle-free transition tunnel between themes. */
+    transitionLength: 120,
+
+    /** m — after the last theme, the cycle repeats every this many metres. */
+    themeCycleLength: 2000,
   },
 
   // ───────────────────────────────────────────────────────────────────────────

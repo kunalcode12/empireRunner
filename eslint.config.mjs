@@ -86,9 +86,28 @@ export default defineConfig([
               message: SIM_IMPORT_MESSAGE,
             },
             {
-              // Any relative traversal out of sim/ that is not into config/.
-              // `../config/x` is legal; `../render/x` and `../../ui/x` are not.
-              regex: "^\\.\\./(?!config/)",
+              // Relative escapes into a sibling LAYER, at any nesting depth.
+              //
+              // Two earlier versions of this rule were wrong, both in the same
+              // way — they tried to allowlist what is permitted:
+              //
+              //   v1  `^\.\./(?!config/)`
+              //       assumed every sim file sat directly in src/game/sim/, and
+              //       rejected a subdirectory's legal `../state` the moment
+              //       src/game/sim/player/ existed.
+              //   v2  allowlisted sibling module names by hand, and rejected
+              //       `../chunk` the moment src/game/sim/level/ added one.
+              //
+              // An allowlist of module names goes stale every time a module is
+              // added, and the failure is a false positive that blocks correct
+              // code. So this denylists the destinations instead: the only
+              // relative escapes that matter are into the six sibling layers,
+              // and those names are fixed by the architecture rather than by
+              // whatever files happen to exist today.
+              //
+              // Bare-package and `@/`-aliased escapes are already covered by the
+              // group patterns above, so this only has to catch relative ones.
+              regex: "^(\\.\\./)+(render|ui|app|input|audio|meta)(/|$)",
               message: SIM_IMPORT_MESSAGE,
             },
           ],
@@ -133,6 +152,53 @@ export default defineConfig([
             "performance.now() is banned in src/game/sim/. The sim measures tick counts, not " +
             "wall-clock time — docs/ARCHITECTURE.md §2a.",
         },
+
+        // ── Transcendentals ──────────────────────────────────────────────────
+        //
+        // ECMA-262 specifies +, -, *, / and Math.sqrt as exactly reproducible
+        // (IEEE-754). It specifies exp, log, pow, sin, cos, tan, atan2, cbrt
+        // and hypot only as "implementation-approximated" — engines may differ
+        // in the last ulp.
+        //
+        // P12 re-validates a browser-recorded replay on a Node server. Chrome,
+        // Safari and Firefox do not share a libm, so one ulp compounded over
+        // 36,000 ticks diverges, and the failure mode is honest players being
+        // rejected as cheaters.
+        //
+        // If the sim genuinely needs one of these, evaluate it ONCE offline and
+        // freeze the result as a decimal literal in TUNING.determinism, the way
+        // speedApproachPerTick is handled. Decimal-to-double conversion IS
+        // exactly specified, so every engine reads the identical bits.
+        ...[
+          "exp",
+          "log",
+          "log2",
+          "log10",
+          "pow",
+          "sin",
+          "cos",
+          "tan",
+          "asin",
+          "acos",
+          "atan",
+          "atan2",
+          "sinh",
+          "cosh",
+          "tanh",
+          "cbrt",
+          "hypot",
+          "expm1",
+          "log1p",
+        ].map((fn) => ({
+          object: "Math",
+          property: fn,
+          message:
+            `Math.${fn}() is banned in src/game/sim/. It is only ` +
+            '"implementation-approximated" by ECMA-262, so browser engines disagree in the ' +
+            "last ulp and cross-engine replay validation breaks. Use exact arithmetic " +
+            "(+ - * / Math.sqrt), or freeze the value offline in TUNING.determinism — see " +
+            "speedApproachPerTick for the pattern.",
+        })),
       ],
 
       "no-restricted-globals": [
@@ -214,7 +280,16 @@ export default defineConfig([
   // ───────────────────────────────────────────────────────────────────────────
   {
     files: ["src/game/**/*.{ts,tsx}"],
-    ignores: ["src/game/config/**"],
+    // Exempt the two places that are DATA rather than logic.
+    //
+    // src/game/config/**      the tuning table itself.
+    // src/game/sim/level/chunks/**  hand-authored chunk layouts. These are lists
+    //   of "entity X at face F, lane L, z Z" — every number IS the content.
+    //   Hoisting each z offset to a named constant would make 32 chunk files
+    //   unreadable to the person authoring the 33rd, which is exactly who they
+    //   are written for. Chunk files contain no branches and no arithmetic; if
+    //   one ever does, it wants to be two chunks instead.
+    ignores: ["src/game/config/**", "src/game/sim/level/chunks/**"],
     rules: {
       "no-magic-numbers": [
         "error",

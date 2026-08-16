@@ -79,10 +79,29 @@ export const F = {
   playerBufferedTimer: 17,
   /** s — remaining invulnerability from a shield or a Fracture resume. */
   playerInvulnerableTimer: 18,
+
+  // ── P04 — player controller ────────────────────────────────────────────────
+  /** s — remaining stumble recovery. Control returns at zero. */
+  playerStumbleTimer: 19,
+  /** u — lane tween origin. Captured when the tween starts. */
+  playerLaneFromX: 20,
+  /** u — lane tween destination, the centre of the target lane. */
+  playerLaneTargetX: 21,
+  /** s — elapsed lane tween time. >= laneChangeDuration means settled. */
+  playerLaneTweenElapsed: 22,
+  /** s — remaining roll time. Runs CONCURRENTLY with any phase (GAME_BIBLE §3.2). */
+  playerRollTimer: 23,
+  /** s — elapsed roll time, for interpolating the 90 degree world rotation. */
+  playerRollElapsed: 24,
+  /** s — remaining slide time. Separate from verbTimer because a slide can run
+   *  while a roll is also in flight. */
+  playerSlideTimer: 25,
+  /** s — remaining slide stand-up tail. Jump is illegal until this reaches zero. */
+  playerSlideRecoveryTimer: 26,
 } as const;
 
 /** Number of Float64 slots. Keep in step with `F`. */
-export const FLOAT_SLOTS = 19;
+export const FLOAT_SLOTS = 27;
 
 export type FloatSlot = (typeof F)[keyof typeof F];
 
@@ -112,13 +131,38 @@ export const Verb = {
 } as const;
 export type VerbValue = (typeof Verb)[keyof typeof Verb];
 
+/**
+ * The player's phase — the exhaustive state machine from P04.
+ *
+ * **Roll is deliberately NOT a member of this enum's exclusivity.** GAME_BIBLE
+ * §3.2 requires jump and slide to remain available throughout a roll, so a roll
+ * runs as a concurrent axis (`playerRollTimer` + `rollDirection`) that can
+ * overlap any phase. `Rolling` here means "rolling while otherwise idle on the
+ * ground"; a roll begun mid-jump leaves the phase at `Jumping`.
+ *
+ * Full transition table lives in `player/phase.ts`.
+ */
+export const Phase = {
+  Running: 0,
+  Jumping: 1,
+  Falling: 2,
+  Sliding: 3,
+  Rolling: 4,
+  Stumbling: 5,
+  Crashed: 6,
+  Fracturing: 7,
+} as const;
+export type PhaseValue = (typeof Phase)[keyof typeof Phase];
+
 /** Player state — integers only. Every double lives in `SimState.f`. */
 export interface PlayerState {
   /** 0..3 — which face is currently the floor. */
   face: number;
   /** 0..2 — lane on the current face, ordered left to right from the player's view. */
   lane: number;
-  /** Verb — what the player is currently doing. */
+  /** Phase — the state machine's current node. */
+  phase: number;
+  /** Verb — what the player is currently doing. Kept for the HUD and events. */
   verb: number;
   /** Verb — a verb issued early and held until it becomes legal. */
   bufferedVerb: number;
@@ -126,6 +170,19 @@ export interface PlayerState {
   grounded: number;
   /** count — shields held. Absorbs a fatal hit without resetting Flow. */
   shields: number;
+  /** -1 left, 0 none, +1 right — direction of the in-flight roll. Concurrent. */
+  rollDirection: number;
+  /** 0 or 1 — whether JUMP was held last tick, for the release edge. */
+  jumpHeld: number;
+  /** 0 or 1 — whether SLIDE was held last tick, for the press edge. */
+  slideHeld: number;
+  /** 0..2 — lane the in-flight tween is heading for. Equals `lane` when settled. */
+  targetLane: number;
+  /** count — corner forgiveness activations this run. Diagnostic: if this climbs,
+   *  the generator is placing unfair geometry. */
+  cornerForgiveCount: number;
+  /** count — stumbles this run. */
+  stumbleCount: number;
 }
 
 /**
@@ -239,10 +296,17 @@ export function createState(): SimState {
     player: {
       face: 0,
       lane: 1,
+      phase: Phase.Running,
       verb: Verb.None,
       bufferedVerb: Verb.None,
       grounded: 1,
       shields: TUNING.pickups.maxShields,
+      rollDirection: 0,
+      jumpHeld: 0,
+      slideHeld: 0,
+      targetLane: 1,
+      cornerForgiveCount: 0,
+      stumbleCount: 0,
     },
     obstacles: createEntityColumns(MAX_OBSTACLES),
     pickups: createEntityColumns(MAX_PICKUPS),
@@ -275,10 +339,17 @@ export function resetState(state: SimState, seeds: RngSeeds): void {
   const player = state.player;
   player.face = 0;
   player.lane = 1;
+  player.phase = Phase.Running;
   player.verb = Verb.None;
   player.bufferedVerb = Verb.None;
   player.grounded = 1;
   player.shields = TUNING.pickups.maxShields;
+  player.rollDirection = 0;
+  player.jumpHeld = 0;
+  player.slideHeld = 0;
+  player.targetLane = 1;
+  player.cornerForgiveCount = 0;
+  player.stumbleCount = 0;
 
   resetEntityColumns(state.obstacles);
   resetEntityColumns(state.pickups);
@@ -315,10 +386,17 @@ export function copyState(dst: SimState, src: SimState): void {
 
   dst.player.face = src.player.face;
   dst.player.lane = src.player.lane;
+  dst.player.phase = src.player.phase;
   dst.player.verb = src.player.verb;
   dst.player.bufferedVerb = src.player.bufferedVerb;
   dst.player.grounded = src.player.grounded;
   dst.player.shields = src.player.shields;
+  dst.player.rollDirection = src.player.rollDirection;
+  dst.player.jumpHeld = src.player.jumpHeld;
+  dst.player.slideHeld = src.player.slideHeld;
+  dst.player.targetLane = src.player.targetLane;
+  dst.player.cornerForgiveCount = src.player.cornerForgiveCount;
+  dst.player.stumbleCount = src.player.stumbleCount;
 
   copyEntityColumns(dst.obstacles, src.obstacles);
   copyEntityColumns(dst.pickups, src.pickups);

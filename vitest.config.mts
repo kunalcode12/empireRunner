@@ -18,6 +18,17 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts", "src/game/**/*.test.ts"],
     exclude: ["node_modules/**", ".next/**", "tests/e2e/**"],
+
+    /**
+     * `--expose-gc` makes `global.gc` available so the allocation test can
+     * measure RETAINED memory rather than transient garbage.
+     *
+     * Without it that test skips, and law (d) in docs/ARCHITECTURE.md is only
+     * checked against a loose transient ceiling — which is JIT-tier dependent
+     * and therefore weak. Forcing a collection is the difference between
+     * "0 bytes retained" as a measurement and as an aspiration.
+     */
+    execArgv: ["--expose-gc"],
     coverage: {
       provider: "v8",
       include: ["src/game/**"],

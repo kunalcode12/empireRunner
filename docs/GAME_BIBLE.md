@@ -279,8 +279,8 @@ Six movement verbs, plus two meta verbs. There are no others. If a future featur
 |---|---|---|
 | `LANE_LEFT` | Move one lane left on the current face. No-op at lane 0. | 0.14s |
 | `LANE_RIGHT` | Move one lane right on the current face. No-op at lane 2. | 0.14s |
-| `JUMP` | Ballistic arc, apex 1.75u at 0.34s, faster fall. Airborne ≈ 0.59s. | 0.59s |
-| `SLIDE` | Collapse hitbox to 0.70u tall, extend to 1.10u deep. | 0.55s |
+| `JUMP` | Ballistic arc, apex 1.75u at 0.34s, faster fall. Airborne ≈ 0.59s. **Variable height:** releasing early halves upward velocity, so a tap is a short hop. | 0.59s |
+| `SLIDE` | Collapse hitbox to 0.70u tall, extend to 1.10u deep. Cannot be cancelled. | 0.55s |
 | `ROLL_LEFT` | Re-anchor gravity to face `-1`. Lane input locked 0.25s. | 0.30s |
 | `ROLL_RIGHT` | Re-anchor gravity to face `+1`. Lane input locked 0.25s. | 0.30s |
 | `OVERDRIVE` | Spend 100 Flow. Ignored below 100. | — |
@@ -342,6 +342,16 @@ Two forgiveness systems apply to every device equally:
 
 Buffered input is **dropped, not queued**, during `rollCommitLock`. That is the exception that makes the roll a commitment.
 
+- **Corner forgiveness 0.12u** — a clip of under 0.12u into an obstacle *edge* nudges the player clear instead of killing them. At `maxSpeed` the player advances 0.567u per tick, so 0.12u is about a fifth of a tick of overlap: a graze, not a hit anyone could have seen coming. It emits a distinct `CORNER_FORGIVE` event so the rate can be **measured** — an invisible mechanic with no telemetry is one nobody can tune. If it fires often, the generator is placing unfair geometry rather than the forgiveness being too generous.
+
+### 6.5 The fast-drop — an undocumented technique
+
+Pressing `SLIDE` while airborne dives to the ground at 28 u/s and lands straight into a slide, instead of doing nothing.
+
+**This is deliberately absent from the tutorial, from the verb table above, and from anything the game ever tells the player.** It is the way Subway Surfers hides its air-control depth: new players never find it, and experts use it to recover a mistimed jump or to punch through a gap in a cluster they read late. Discovering it should feel like discovering something the game did not offer.
+
+Being undocumented in-game does not mean being undocumented here. It is a real mechanic with a tuned constant (`fastDropSpeed`), and it is the reason the phase machine has `JUMPING → Land` and `JUMPING → LandIntoSlide` edges: the dive can reach the floor before the jump ever reaches apex.
+
 ---
 
 ## 7. Entity catalogue
@@ -354,8 +364,8 @@ Notation for **Faces**: `any` = the generator may place it on any face; `floor-r
 |---|---|---|---|---|---|
 | 1 | **Block** | 1 lane | `LANE_*`, `ROLL_*`, `JUMP` (if ≤ 1.2u) | any | The primer. Introduced in band 1. |
 | 2 | **Stack** | 1 lane, 2.4u tall | `LANE_*`, `ROLL_*` | any | Too tall to jump. Teaches that height is not always the answer. |
-| 3 | **Low Bar** | 3 lanes, 0.0–1.05u | `SLIDE`, `ROLL_*` | any | The perfect-slide source. |
-| 4 | **High Gate** | 3 lanes, 1.4u–top | `JUMP`, `ROLL_*` | any | Clearance 1.4u vs jump apex 1.75u = 0.35u margin. |
+| 3 | **Low Bar** | 3 lanes, **1.05u → ceiling** | `SLIDE`, `ROLL_*` | any | Hangs from above. `lowBarClearance` 1.05u is its **underside**; the 0.70u slide box fits, the 1.60u standing box does not. The perfect-slide source. |
+| 4 | **High Gate** | 3 lanes, **floor → 1.40u** | `JUMP`, `ROLL_*` | any | Stands on the floor. `highGateClearance` 1.40u is its **top**; jump apex 1.75u clears it by 0.35u. Blocks a slide as well as a stand, which is what makes it the mirror of the Low Bar. |
 | 5 | **Pillar Pair** | 2 lanes | `LANE_*` to the free lane, `ROLL_*` | any | One lane always clear on its own face. |
 | 6 | **Full-Face Wall** | **3 lanes, full height, one face** | **`ROLL_*` only** | any | The signature entity. No jump, no slide, no lane. Generator must guarantee a clear cell on an adjacent face. Unlocked band 3. |
 | 7 | **Void Gap** | 3 lanes, a `gapLength` hole in the floor | `JUMP`, `ROLL_*` | floor-relative | Coyote time applies at the leading edge. Rolling mid-gap lands you on a face that still has floor. |
@@ -620,6 +630,24 @@ A run can end for exactly these reasons. There are no others.
 | 4 | **Corner Brace roll into geometry** — a roll resolves into an occupied cell | **No** | The player rolled into a visible, telegraphed blocker. Fracture would undermine the entity's whole purpose. |
 | 5 | **Fracture failure** — wrong verb or 1.2s timeout | — | Terminal by definition |
 | 6 | **Out of Fractures** — a fatal hit with `maxFracturesPerRun` spent or 0 Shards held | — | The death screen names which, so the player knows whether to buy or to improve |
+
+### 12.1 STUMBLE — the outcome between "fine" and "dead"
+
+Not every contact is fatal. An obstacle classified **STUMBLE** costs the player momentum instead of the run:
+
+| | |
+|---|---|
+| World speed | × **0.55** for the duration |
+| Recovery | **0.70s** before control returns |
+| Invulnerability | **0.35s**, so one bad cluster cannot chain-stumble you into a wall |
+| Flow | Unaffected — a stumble is not a crash |
+| Event | `STUMBLE` on entry, `STUMBLE_END` on recovery |
+
+**Why it exists.** Without a middle outcome every obstacle is a binary life-or-death check, and a game of pure binary checks has no texture — you are either perfect or restarting. A stumble punishes a mistake in the currency the player actually cares about at speed (momentum, and therefore distance and Flow-earning time) while leaving the run alive. It is also what makes the difference between a glancing clip and a solid hit *legible*.
+
+`stumbleRecovery` must stay below the time it takes the next obstacle to arrive at band-5 density, or a stumble becomes an unavoidable death rather than a setback.
+
+**Which obstacles stumble rather than kill is not yet decided.** The classification table is a placeholder until the entity catalogue lands at P07; §7 does not yet mark any entity as STUMBLE.
 
 Not failure states, for the avoidance of doubt:
 

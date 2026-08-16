@@ -263,8 +263,11 @@ describe("the anti-cheat", () => {
   });
 
   it("rejects a tampered input log", () => {
+    // This was a canary through P02: with the player controller stubbed, input
+    // changed nothing and a tampered log still verified. P04 landed the
+    // controller, so a single flipped input now diverges the whole run and the
+    // hash no longer matches. The anti-cheat is fully closed as of here.
     const { bytes } = runAndSerialize(RUN_SEED, 300);
-    // Flip an input midway. The header hash no longer describes this run.
     bytes[HEADER_BYTES + 150] = packIntent({
       lateral: 1,
       roll: 1,
@@ -272,11 +275,39 @@ describe("the anti-cheat", () => {
       slide: true,
     });
 
-    // NOTE: the player controller is a P04 stub, so input does not yet affect
-    // state and this currently still verifies. The check that MATTERS today is
-    // the one below — the server computes the score rather than reading it.
-    // This assertion flips to false the moment P04 lands, by design.
-    expect(verify(bytes).valid).toBe(true);
+    const result = verify(bytes);
+    expect(result.valid).toBe(false);
+    expect(result.rejection).toBe(ReplayRejection.HashMismatch);
+  });
+
+  it("a single flipped lateral bit, once, mid-run, is caught", () => {
+    // Not just gross tampering. One input, changed once, 300 ticks from the end.
+    const { bytes } = runAndSerialize(RUN_SEED, 600);
+    const target = HEADER_BYTES + 300;
+    const LATERAL_MASK = 0b11;
+    const LATERAL_RIGHT = 2; // encoded as lateral + 1
+    bytes[target] = ((bytes[target] ?? 0) & ~LATERAL_MASK) | LATERAL_RIGHT;
+
+    expect(verify(bytes).valid).toBe(false);
+  });
+
+  it("a hash-neutral edit is also score-neutral, so it is not a cheat", () => {
+    // Worth stating plainly, because it looks like a hole and is not. Inserting
+    // a lone jump in open space heals completely — every timer returns to zero
+    // and the player lands where they started — so the final hash still
+    // matches. But the server RECOMPUTES the score from the log rather than
+    // reading a claimed one, and an edit that changes nothing about the final
+    // state changes nothing about the score either. There is nothing to gain.
+    const { bytes, sim } = runAndSerialize(RUN_SEED, 600);
+    const honestScore = getF(sim.getState(), F.score);
+
+    const target = HEADER_BYTES + 300;
+    const JUMP_BIT = 0b00010000;
+    bytes[target] = (bytes[target] ?? 0) ^ JUMP_BIT;
+
+    const result = verify(bytes);
+    expect(result.valid).toBe(true);
+    expect(result.score).toBe(honestScore);
   });
 
   it("rejects a tampered seed", () => {

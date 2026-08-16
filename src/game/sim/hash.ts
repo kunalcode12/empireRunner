@@ -112,10 +112,17 @@ export function hashState(state: SimState): number {
   const p = state.player;
   h = mixWord(h, p.face);
   h = mixWord(h, p.lane);
+  h = mixWord(h, p.phase);
   h = mixWord(h, p.verb);
   h = mixWord(h, p.bufferedVerb);
   h = mixWord(h, p.grounded);
   h = mixWord(h, p.shields);
+  h = mixWord(h, p.rollDirection);
+  h = mixWord(h, p.jumpHeld);
+  h = mixWord(h, p.slideHeld);
+  h = mixWord(h, p.targetLane);
+  h = mixWord(h, p.cornerForgiveCount);
+  h = mixWord(h, p.stumbleCount);
 
   h = mixEntityColumns(h, state.obstacles);
   h = mixEntityColumns(h, state.pickups);
