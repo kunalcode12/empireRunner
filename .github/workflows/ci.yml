@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A newer push to the same branch makes the in-flight run obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      # Four separate steps on purpose: a red run names which gate failed
+      # without anyone having to read the log.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Next.js 16 does NOT run ESLint during `next build`, so this is a
+      # required gate in its own right. It also enforces the layering law in
+      # docs/ARCHITECTURE.md §3 — see eslint.config.mjs.
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

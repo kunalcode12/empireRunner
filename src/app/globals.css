@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@import "../ui/tokens.css";
+
+@theme inline {
+  --color-axis-bg: var(--axis-bg);
+  --color-axis-fg: var(--axis-fg);
+  --color-axis-muted: var(--axis-muted);
+  --color-axis-accent: var(--axis-accent);
+  --color-axis-surface: var(--axis-surface);
+  --font-display: var(--axis-font-display);
+  --font-mono: var(--axis-font-mono);
+  --font-sans: var(--axis-font-body);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--axis-bg);
+  color: var(--axis-fg);
+  font-family: var(--axis-font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The runner is read at speed. Motion is information here, so the reduced-motion
+   path is a real setting rather than a blanket kill — but ambient animation goes. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

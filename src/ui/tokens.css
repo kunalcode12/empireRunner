@@ -1,0 +1,55 @@
+/**
+ * AXIS design tokens.
+ *
+ * Screen-printed arcade: thick flat colour fields, heavy black key-lines, visible
+ * halftone grain, 4-6 colours per theme, deep shadow, no soft gradients.
+ * Full art direction in docs/GAME_BIBLE.md §11.
+ *
+ * BANNED, per GAME_BIBLE §11.3 — do not reintroduce, not even as a placeholder:
+ *   - backgrounds darker than the active theme's darkest colour
+ *   - neon cyan / magenta as a primary or accent
+ *   - emissive glow as an ambient material property (Overdrive only)
+ *   - perspective grid floors with glowing lines
+ *   - constant chromatic aberration, scanlines outside the Static theme
+ *
+ * Only the Kiln palette is defined here. Undertow, Bazaar and Static land with the
+ * theme registry in P10 (src/game/config/themes.ts).
+ */
+
+:root {
+  /* ── Kiln palette — 5 colours, and that is the whole list ─────────────── */
+  --axis-keyline: #0b0b0c;
+  --axis-gunmetal: #2b2b2f;
+  --axis-ember: #e4572e;
+  --axis-ash: #8c8c90;
+  --axis-bone: #ede6db;
+
+  /* ── Semantic roles ───────────────────────────────────────────────────── */
+  --axis-bg: var(--axis-keyline);
+  --axis-fg: var(--axis-bone);
+  --axis-muted: var(--axis-ash);
+  --axis-accent: var(--axis-ember);
+  --axis-surface: var(--axis-gunmetal);
+
+  /* ── Type ──────────────────────────────────────────────────────────────
+   * Real typefaces are P10/P14 work: a heavy condensed grotesque for display,
+   * a wide mono for every numeral in the game, one clean sans for body.
+   * System stacks stand in until then — deliberately, so the build has no
+   * network dependency and CI cannot fail on a font fetch.
+   */
+  --axis-font-display:
+    "Haettenschweiler", "Arial Narrow", "Oswald", ui-sans-serif, system-ui, sans-serif;
+  --axis-font-mono:
+    ui-monospace, "SFMono-Regular", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  --axis-font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* ── Key-line weight. 2-3px at 1080p, scaling with distance in 3D. ────── */
+  --axis-keyline-width: 2px;
+
+  /* ── Spacing scale ────────────────────────────────────────────────────── */
+  --axis-space-1: 0.25rem;
+  --axis-space-2: 0.5rem;
+  --axis-space-3: 1rem;
+  --axis-space-4: 2rem;
+  --axis-space-5: 4rem;
+}
