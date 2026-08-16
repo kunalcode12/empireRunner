@@ -34,6 +34,17 @@ export interface Intent {
   roll: number;
   jump: boolean;
   slide: boolean;
+  /**
+   * Spend the full Flow meter on Overdrive. Ignored below `overdriveCost`.
+   *
+   * A **held** state like `jump` and `slide`, not a press event — the sim derives
+   * the press edge itself. Holding the key does not re-trigger, and it does not
+   * queue: an Overdrive requested at 99 Flow is simply dropped, per GAME_BIBLE §6
+   * ("Ignored below 100"), never buffered until the meter fills. Buffering it
+   * would take the timing decision away from the player, and *when* to spend is
+   * the whole decision.
+   */
+  overdrive: boolean;
 }
 
 /**
@@ -48,11 +59,12 @@ export const IDLE_INTENT: Readonly<Intent> = Object.freeze({
   roll: Roll.None,
   jump: false,
   slide: false,
+  overdrive: false,
 });
 
 /** Creates a mutable intent. Callers reuse one instance rather than allocating per tick. */
 export function createIntent(): Intent {
-  return { lateral: Lateral.None, roll: Roll.None, jump: false, slide: false };
+  return { lateral: Lateral.None, roll: Roll.None, jump: false, slide: false, overdrive: false };
 }
 
 /** Clears an intent in place. Allocates nothing. */
@@ -61,6 +73,7 @@ export function clearIntent(intent: Intent): void {
   intent.roll = Roll.None;
   intent.jump = false;
   intent.slide = false;
+  intent.overdrive = false;
 }
 
 /** Copies an intent in place. Allocates nothing. */
@@ -69,6 +82,7 @@ export function copyIntent(dst: Intent, src: Intent): void {
   dst.roll = src.roll;
   dst.jump = src.jump;
   dst.slide = src.slide;
+  dst.overdrive = src.overdrive;
 }
 
 /**
@@ -84,6 +98,7 @@ export function sanitizeIntent(intent: Intent): void {
   intent.roll = clampAxis(intent.roll);
   intent.jump = intent.jump === true;
   intent.slide = intent.slide === true;
+  intent.overdrive = intent.overdrive === true;
 }
 
 function clampAxis(value: number): number {

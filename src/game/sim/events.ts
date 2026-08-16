@@ -81,6 +81,36 @@ export const SimEvent = {
    * payload0 = penetration depth, payload1 = obstacle index.
    */
   CornerForgive: 24,
+
+  // ── P08 — scoring and Flow ─────────────────────────────────────────────────
+  /**
+   * Emitted every tick Overdrive is active.
+   *
+   * payload0 = seconds remaining, payload1 = fraction remaining in [0, 1].
+   *
+   * A per-tick event rather than a state read because the audio layer needs to
+   * schedule the comedown *ahead* of the expiry, and the render layer drives the
+   * palette inversion's fade from the fraction. Both would otherwise have to
+   * reach into SimState and duplicate the countdown arithmetic.
+   */
+  OverdriveTick: 25,
+  /** Flow crossed a gain. payload0 = amount, payload1 = source (`FlowSource`),
+   *  payload2 = resulting Flow. The HUD's floating "+6" comes from here. */
+  FlowGain: 26,
+  /** The Fracture window is open and draining. payload0 = real seconds left,
+   *  payload1 = fraction left in [0, 1], payload2 = the one clearing verb. */
+  FractureTick: 27,
+  /**
+   * A death with NO clearing verb — an unwinnable spawn, which is a generator bug.
+   *
+   * GAME_BIBLE §5.2 specifies the ship behaviour: arm Fracture anyway and accept
+   * any verb, rather than punishing the player for the generator's mistake. This
+   * event is the telemetry half of that deal. The P06 fuzz exists to keep it from
+   * ever firing; if it appears in production, a chunk is wrong.
+   *
+   * payload0 = obstacle kind, payload1 = face, payload2 = lane.
+   */
+  GeneratorUnwinnable: 28,
 } as const;
 export type SimEventValue = (typeof SimEvent)[keyof typeof SimEvent];
 

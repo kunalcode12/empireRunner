@@ -50,6 +50,7 @@
 import { TUNING } from "../config/tuning";
 import { createIntent, type Intent } from "./intent";
 import { createSim } from "./sim";
+import { getScore } from "./scoring/score";
 import { F, getF } from "./state";
 
 const FORMAT_VERSION = TUNING.replay.formatVersion;
@@ -70,10 +71,21 @@ const OFFSET_SEED = 8;
 const OFFSET_TICK_COUNT = 12;
 const OFFSET_FINAL_HASH = 16;
 
+// Intent byte layout. Bit 7 remains free.
+//
+//   7        6          5       4      3 2     1 0
+//   ┌──────┬───────────┬───────┬──────┬───────┬───────┐
+//   │ free │ overdrive │ slide │ jump │ roll  │ lateral│
+//   └──────┴───────────┴───────┴──────┴───────┴───────┘
+//
+// OVERDRIVE was added at v3 into a bit that v2 required to be zero, so a v2
+// replay is bit-compatible but re-simulates differently now that Flow is live.
+// It is rejected on version, not on layout.
 const AXIS_MASK = 0b11;
 const ROLL_SHIFT = 2;
 const JUMP_SHIFT = 4;
 const SLIDE_SHIFT = 5;
+const OVERDRIVE_SHIFT = 6;
 const BIT_SET = 1;
 const LITTLE_ENDIAN = true;
 
@@ -83,7 +95,8 @@ export function packIntent(intent: Intent): number {
   const roll = (intent.roll + 1) & AXIS_MASK;
   const jump = intent.jump ? BIT_SET << JUMP_SHIFT : 0;
   const slide = intent.slide ? BIT_SET << SLIDE_SHIFT : 0;
-  return lateral | (roll << ROLL_SHIFT) | jump | slide;
+  const overdrive = intent.overdrive ? BIT_SET << OVERDRIVE_SHIFT : 0;
+  return lateral | (roll << ROLL_SHIFT) | jump | slide | overdrive;
 }
 
 /** Unpacks a byte into an existing intent. Allocates nothing. */
@@ -92,6 +105,7 @@ export function unpackIntent(byte: number, out: Intent): void {
   out.roll = ((byte >> ROLL_SHIFT) & AXIS_MASK) - 1;
   out.jump = ((byte >> JUMP_SHIFT) & BIT_SET) === BIT_SET;
   out.slide = ((byte >> SLIDE_SHIFT) & BIT_SET) === BIT_SET;
+  out.overdrive = ((byte >> OVERDRIVE_SHIFT) & BIT_SET) === BIT_SET;
 }
 
 /**
@@ -287,7 +301,7 @@ export function verify(bytes: Uint8Array): VerifyResult {
   return {
     valid: hash === header.finalHash,
     rejection: hash === header.finalHash ? ReplayRejection.None : ReplayRejection.HashMismatch,
-    score: getF(state, F.score),
+    score: getScore(state),
     distance: getF(state, F.distance),
     hash,
     claimedHash: header.finalHash,

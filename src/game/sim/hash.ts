@@ -105,6 +105,10 @@ export function hashState(state: SimState): number {
   h = mixWord(h, state.runStatus);
   h = mixWord(h, state.band);
   h = mixWord(h, state.fracturesUsed);
+  h = mixWord(h, state.bitStreak);
+  h = mixWord(h, state.combo);
+  h = mixWord(h, state.bestCombo);
+  h = mixWord(h, state.fractureVerb);
   h = mixWord(h, state.rngGenerator);
   h = mixWord(h, state.rngPickup);
   h = mixWord(h, state.rngCosmetic);
@@ -123,6 +127,7 @@ export function hashState(state: SimState): number {
   h = mixWord(h, p.targetLane);
   h = mixWord(h, p.cornerForgiveCount);
   h = mixWord(h, p.stumbleCount);
+  h = mixWord(h, p.shards);
 
   h = mixEntityColumns(h, state.obstacles);
   h = mixEntityColumns(h, state.pickups);

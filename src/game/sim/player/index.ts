@@ -61,6 +61,9 @@ import {
 } from "./locomotion";
 import { Edge, isGroundedPhase, isTerminalPhase, tryTransition } from "./phase";
 import { tickDown } from "./timer";
+import { breakBitStreak, zeroFlow } from "@/game/sim/scoring/flow";
+import { breakCombo } from "@/game/sim/scoring/score";
+import { tryArmFracture } from "@/game/sim/scoring/fracture";
 
 const STUMBLE_RECOVERY = TUNING.collision.stumbleRecovery;
 const STUMBLE_INVULNERABILITY = TUNING.collision.stumbleInvulnerability;
@@ -186,6 +189,9 @@ export const CrashCause = {
 /** Applies the face/lane transform when a roll finishes. */
 function completeRoll(state: SimState, events: EventRing): void {
   const player = state.player;
+  // Captured before it is cleared: the scoring pass needs the direction to
+  // recover which cell the player rolled *from* when testing for a forced roll.
+  const direction = player.rollDirection;
   applyRoll(player.face, player.lane, player.rollDirection, scratchFaceLane);
 
   // The tween target mirrors too, so a lane change in flight survives the roll.
@@ -204,7 +210,7 @@ function completeRoll(state: SimState, events: EventRing): void {
   if (player.phase === Phase.Rolling) {
     player.phase = tryTransition(player.phase, Edge.RollEnd);
   }
-  emit(events, SimEvent.RollEnd, state.tick, player.face, player.lane);
+  emit(events, SimEvent.RollEnd, state.tick, player.face, player.lane, direction);
 }
 
 /** Attempts a lane change in `direction`. A wall is a no-op, not an error. */
@@ -371,22 +377,52 @@ export const LEAVE_GROUND_MARKER = -1;
  * Without this the world keeps scrolling and `distance` keeps accumulating
  * after death, so a crashed player would go on scoring forever. `sim.tick`
  * short-circuits on `RunStatus.Ended`.
- *
- * P09 replaces the unconditional end with a Fracture window: it will set
- * `RunStatus.Fracturing` instead when a Shard is held and the death had exactly
- * one clearing verb.
  */
 function endRun(state: SimState, events: EventRing, cause: number): void {
+  // GAME_BIBLE §4.1: a crash ZEROES Flow. Not reduces — zeroes. The whole point
+  // of the escalation loop is that accumulated Flow is unbanked and a crash
+  // forfeits every point of it at once.
+  zeroFlow(state);
+  breakBitStreak(state);
+  breakCombo(state);
+
   state.player.verb = Verb.None;
   emit(events, SimEvent.Crash, state.tick, cause);
   state.runStatus = RunStatus.Ended;
   emit(events, SimEvent.RunEnd, state.tick, cause);
 }
 
-/** Kills the player. Called by collision. */
-export function applyFatal(state: SimState, events: EventRing, cause: number): void {
+/**
+ * Kills the player — or opens a Fracture window instead.
+ *
+ * Flow is zeroed here rather than by the scoring pass, and unconditionally,
+ * because GAME_BIBLE §4.1 is emphatic that a crash **zeroes** the meter rather
+ * than reducing it. A successful Fracture restores half of the value captured at
+ * this instant, which is why `tryArmFracture` snapshots `flowAtDeath` before
+ * this runs.
+ *
+ * @param obstacleIndex the obstacle that landed the hit, or -1 for a death with
+ *        no obstacle behind it (falling out of the world). Fracture needs it to
+ *        work out which single verb would have cleared the death.
+ */
+export function applyFatal(
+  state: SimState,
+  events: EventRing,
+  cause: number,
+  obstacleIndex = -1,
+): void {
   const player = state.player;
   player.phase = tryTransition(player.phase, Edge.FatalHit);
+
+  if (tryArmFracture(state, obstacleIndex, events)) {
+    // The window is open. Flow is NOT zeroed yet — `flowAtDeath` has been
+    // captured, and a successful resume restores half of it. The run is not over,
+    // so no Crash or RunEnd is emitted; `FractureArm` already went out.
+    player.phase = tryTransition(player.phase, Edge.FractureArm);
+    player.verb = Verb.None;
+    return;
+  }
+
   endRun(state, events, cause);
 }
 

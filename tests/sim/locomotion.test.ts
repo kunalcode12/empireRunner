@@ -14,7 +14,7 @@ function idle(): Intent {
 }
 
 function held(partial: Partial<Intent>): Intent {
-  return { lateral: 0, roll: 0, jump: false, slide: false, ...partial };
+  return { lateral: 0, roll: 0, jump: false, slide: false, overdrive: false, ...partial };
 }
 
 /** Runs `ticks` ticks of the same intent and returns the sim. */
@@ -328,7 +328,7 @@ describe("roll", () => {
     let rejectedTicks = 0;
 
     // Lateral pressed on the same tick as the roll must also be dropped.
-    sim.tick({ lateral: 1, roll: 1, jump: false, slide: false });
+    sim.tick({ lateral: 1, roll: 1, jump: false, slide: false, overdrive: false });
     expect(sim.getState().player.targetLane).toBe(startLane);
     rejectedTicks += 1;
 
@@ -444,6 +444,7 @@ describe("a 30-second scripted input log", () => {
         roll: phase === 60 ? 1 : 0,
         jump: phase >= 20 && phase < 26,
         slide: phase >= 70 && phase < 74,
+        overdrive: false,
       };
     }
 

@@ -157,11 +157,18 @@ This is what creates the signature moment: a **Full-Face Wall** occupies all 3 l
 
 | Event | Flow | Condition |
 |---|---|---|
-| Near-miss | **+6** | Player AABB passes within `nearMissRadius` 0.45u of a hazard AABB (surface to surface) without contacting it. One award per obstacle instance, ever. |
-| Perfect slide | **+4** | A slide clears a low bar with ≤ `perfectSlideMargin` 0.12s of spare clearance at either end. Sliding early and lying there does not count. |
+| Near-miss | **+3 to +6** | Player AABB passes within `nearMissRadius` 0.45u of a hazard AABB (surface to surface) without contacting it. One award per obstacle instance, ever. **Scaled by proximity:** the full +6 at zero gap, falling linearly to `nearMissScaleMin` × 6 = +3 at exactly 0.45u. |
+| Perfect slide | **+4** | A slide begins no more than `perfectSlideMargin` 0.12s before the low bar reaches the player, and is still active when it does. Sliding early and lying there does not count. |
 | Bit streak | **+3** | Every 10th consecutive Bit collected without missing a Bit that entered the magnet-eligible cone. Streak resets on a miss or a crash. |
+| Forced roll | **+10** | A completed roll that escaped a blocker no other verb could have beaten — every vertical state blocked, every lane on the face covered. Checked, not assumed: rolling on empty track earns nothing. |
 | Overdrive Cell | **+35** | Pickup. |
 | Shard pickup | **+10** | Pickup. |
+
+**DECISION — near-miss Flow is scaled by proximity (P08).** A flat award pays a 0.44u graze exactly as much as a 0.02u one, which teaches the player that "near enough" is near enough. Linear rather than curved because a curve needs `Math.pow`, which is banned in the sim for the P12 cross-engine determinism reason.
+
+**DECISION — the forced roll is a new Flow source (P08).** The roll is the signature verb and was the only one of the six with no Flow attached, which made the optimal Flow line "stay on one face and graze things" — the precise opposite of the game's thesis. At +10 it is the largest non-pickup gain.
+
+**DECISION — the perfect-slide window is the LEADING edge only (P08).** This entry previously read "≤ 0.12s of spare clearance at either end", which is unsatisfiable: a slide lasts 0.55s, so the time before the bar and the time after it always sum to 0.55, and both being under 0.12 would need a sum under 0.24. No slide could ever have qualified. The second sentence disambiguates it — the award is for committing *late*, and the trailing edge is simply 0.55 minus the leading one.
 
 **Losses:**
 
@@ -222,6 +229,8 @@ Duration `overdriveDuration` = **6.0s**. During Overdrive:
 - **Palette inverts** to flat wireframe: the theme's key-line black becomes the fill, the fill becomes the line. This is the only place in the game bloom is permitted (see §11).
 - Shattering an obstacle awards its full near-miss value as **score**, not Flow.
 
+Overdrive does **not** change `worldSpeed`. A +30% bonus was proposed at P08 and rejected: `speedCeiling` 28 × 1.3 = 36.4 breaches the LOCKED `maxSpeed` of 34, and every chunk in the P06 pool was proven survivable *at* maxSpeed — running faster than that voids all 43 proofs at once. Overdrive already reads as fast because the palette inverts and the player stops dodging.
+
 On exit: `overdriveExitFlow` = **25**.
 
 **DECISION — Overdrive exits at 25 Flow rather than 0.** Exiting a triumphant 6-second power fantasy into a dead meter reads as a punishment for using the mechanic, and playtest-standard practice in escalation games is to leave the player mid-ramp. 25 is a quarter-meter: meaningful, not free. If Overdrive turns out to be spammable, lower this before touching duration.
@@ -251,7 +260,11 @@ t <= 1.200  Player inputs a verb.
 
 ### 5.2 The correct move
 
-There is exactly one. The sim computes it at the moment of death by replaying the last `fractureLookback` 0.40s of state against each of the six movement verbs and selecting the single verb that would have produced a clear cell. Because the sim is deterministic (law (a)), this is exact, not heuristic.
+There is exactly one. The sim computes it at the moment of death by testing each of the six movement verbs and selecting the single one that would have produced a clear cell. Because the sim is deterministic (law (a)), this is exact, not heuristic.
+
+**IMPLEMENTATION NOTE (P08) — this is not done by replaying 0.40s.** The paragraph above originally specified re-simulating the last `fractureLookback` 0.40s of state against each verb. That needs a ring of 24 full `SimState` snapshots kept live at all times against the chance of a death, which is a permanent per-tick cost for a feature that fires at most twice a run. What ships instead asks the question directly: *for each verb, is the cell it reaches clear of the obstacle that killed me?*, resolved against the logical blocking model in `sim/level/entities.ts` — the same one the P06 chunk solver uses. Exact and deterministic, which is the property this section actually depends on.
+
+Where the shipped version is weaker: it does not know whether the player had *time* to input that verb 0.40s ago, so it can nominate a verb that was clearing in principle but unreachable in practice. `fractureLookback` is consequently **unused** by the current implementation. Revisit if the snapshot ring ever exists for another reason.
 
 - If **two or more** verbs would have cleared it, Fracture does not arm — the death was avoidable by multiple routes and the player simply misplayed. The run ends. (This also means Fracture *teaches*: it only ever fires on deaths that had a single answer.)
 - If **zero** verbs would have cleared it, that is an unwinnable spawn and a **generator bug**. Ship behaviour: arm Fracture with any verb accepted, and log a `GENERATOR_UNWINNABLE` telemetry event. The fuzz test in P06 exists to make this never fire.
@@ -300,6 +313,8 @@ Six movement verbs, plus two meta verbs. There are no others. If a future featur
 | `PAUSE` | `Esc` | `P` |
 
 All bindings are remappable and persisted in `meta/save`. `W`/`↑` doubling as jump is deliberate: the reflex from three-lane runners is "up = jump," and fighting it costs first-run retention.
+
+**Note (P08).** P03 shipped `Shift` bound to `SLIDE`, on the shooter "crouch" instinct, and its unit test encoded that. Shift is `OVERDRIVE`; a key cannot be both. Corrected in `src/game/input/keyboard.ts` and in the binding test. Slide is `S` / `↓` only.
 
 ### 6.2 Touch
 

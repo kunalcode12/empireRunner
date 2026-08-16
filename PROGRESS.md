@@ -23,8 +23,8 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P05** | Render bridge & camera | r3f canvas, `dynamic(ssr:false)` mount, four-face prism geometry, runner mesh, snapshot interpolation, camera rig, r3f-perf, leva | Game boots and runs at 60fps; `< 100` draw calls desktop, `< 50` mobile; roll reads correctly and the reduced-motion path works | Not started |
 | **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | **Complete (not wired live)** |
 | **P07** | Entity catalogue | All 12 obstacles, 4 hazards, 7 pickups; instanced + pooled rendering; collision resolution; near-miss detection | Every entity in GAME_BIBLE §7 spawns, renders, and is defeated by exactly its listed verbs; near-miss fires at 0.45u surface-to-surface | Not started |
-| **P08** | Flow & Overdrive | Flow meter, all gain/decay sources, multiplier, flow→speed coupling, Overdrive mode + palette inversion + shatter | Flow math matches TUNING.md §9.1 in headless tests; Overdrive lasts exactly 6.0s, exits at 25 Flow; crash zeroes Flow | Not started |
-| **P09** | Fracture & cosmetic physics | Death freeze, correct-verb solver, 1.2s slow-mo window, resume; Rapier v2 debris and ragdolls | Solver picks the single clearing verb from a 0.40s lookback; arms only on single-answer deaths; **Rapier never writes to sim** (boundary test) | Not started |
+| **P08** | Flow & Overdrive | Flow meter, all gain/decay sources, multiplier, flow→speed coupling, Overdrive mode + palette inversion + shatter | Flow math matches TUNING.md §9.1 in headless tests; Overdrive lasts exactly 6.0s, exits at 25 Flow; crash zeroes Flow | **Complete (sim only — gains cannot fire, nothing spawns)** |
+| **P09** | Fracture & cosmetic physics | ~~Death freeze, correct-verb solver, 1.2s slow-mo window, resume~~ (landed at P08); Rapier v2 debris and ragdolls; the palette inversion and Overdrive/Fracture visuals | Solver picks the single clearing verb; arms only on single-answer deaths; **Rapier never writes to sim** (boundary test) | Sim half **Complete** at P08 · render half Not started |
 | **P10** | Themes & art direction | Screen-print materials, key-lines, halftone, the four themes, transition tunnels, posterised fog | All four themes render at ≤ 6 colours; zero bloom outside Overdrive; the §11.3 ban holds under review; draw calls still in budget | Not started |
 | **P11** | Audio | Web Audio graph, buses, ducking, per-theme stems with cross-fade, pooled SFX voices | Stems stay sample-locked across a 10-minute run; no `<audio>` elements; voice pool never allocates mid-run | Not started |
 | **P12** | Leaderboards & replay validation | API routes, submit/read, **server-side replay re-simulation**, weekly reset | A tampered score is rejected; a legitimate replay validates; server re-sim result === client result | Not started |
@@ -46,6 +46,143 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-16 — Cross-phase bug audit — **Complete**
+
+A deliberate sweep across P01–P08 rather than a feature phase. Gate: typecheck, lint,
+602 tests, build — all green (was 594; six regression tests added).
+
+**Six real bugs found and fixed.** Five were introduced by P08 and one by P02.
+
+| # | Severity | Bug |
+|---|---|---|
+| 1 | **Critical** | `verify()` returned score 0 for every replay |
+| 2 | **Critical** | Dying while holding a key instantly resolved the Fracture |
+| 3 | High | The escape solver consulted only the obstacle that killed you |
+| 4 | Medium | A failed Fracture left Flow at full |
+| 5 | Medium | `fillWindow` was an unbounded `while` loop |
+| 6 | Low | Fracture resume/fail bypassed the phase transition table |
+
+**1 — `verify()` reported a score of 0 for every replay.** P08 moved the score into
+`F.scoreFixed` but left the P02 `F.score` slot in place, and `replay.ts` still read it. That
+function is the **authoritative server-side score for the entire leaderboard** in P12. Three
+replay tests passed throughout, because both sides of their comparison were 0 — a test that
+validated nothing. Slot 4 is now `scoreLegacyUnused` so any reader is a compile error, and the
+round-trip test asserts the score is non-zero so it cannot go vacuous again.
+
+**2 — the Fracture window consumed the death tick's own input.** Collision arms at step 5 and
+scoring runs at step 6 of the *same* tick, so the window resolved against whatever the player
+held at the instant of death. `jump` is a **held** state and players hold it more or less
+permanently, so in practice almost every Fracture resolved on tick zero: a Shard spent, the run
+over, before the window was ever drawn. The arming tick now ignores input, guarded on the
+timer's own value so it cannot drift out of sync with the arming code.
+
+**3 — the escape solver only looked at the killing obstacle.** So a roll that cleared the wall
+and flew into something on the destination face still counted as an answer, and a death with
+"two answers" against the killer could have zero real ones — meaning Fracture declined to arm
+on exactly the deaths it exists for. Now tests each destination cell against every obstacle
+within a 4u lookahead. The test named *"finds no answer at all when the same lane is blocked on
+all four faces"* had been asserting `count === 2`.
+
+**4 — a failed Fracture left Flow at full.** Arming deliberately skips zeroing so `flowAtDeath`
+survives for a successful resume; the failure path never picked it up, contradicting
+GAME_BIBLE §4.1. Invisible today, visible on the P14 death screen.
+
+**5 — `fillWindow` was unbounded.** A `while` loop driven by a caller-supplied distance, due to
+run inside the tick at P07. Hangs outright on a NaN distance and emits an unbounded burst on a
+large forward jump — the Head Start boost skips 300m. Now capped at `windowChunks + 1` per
+call, with a test proving it still keeps up with normal play at maxSpeed.
+
+**6 — Fracture resume/fail assigned `player.phase` directly**, routing around the transition
+table and its dev-mode guard. Both now go through `tryTransition`.
+
+**Also swept and found clean:** `clock.ts` (spiral guard, tab-resync), `pool.ts` (free list,
+double-release guards), `rng.ts` (modulo bias documented and negligible), `forgiveness.ts`,
+`collider.ts`, the generator's ring recycling and seam/milestone logic, and every timer in the
+sim — `grep` confirms `tickDown` is the only place a timer is decremented.
+
+**Not fixed, by design:** `classifyContact`'s odd/even placeholder and the single 0.5u obstacle
+collider are P07's job and are already recorded as such. The near-miss award fires while the
+obstacle is still approaching rather than once it is passed; harmless today, worth revisiting
+when obstacles actually spawn.
+
+---
+
+### 2026-08-16 — P08 · Flow, Overdrive, score, Fracture — **Complete**
+
+**Verify gate — all green**
+
+```
+npm run typecheck && npm run test
+
+> tsc --noEmit         (clean)
+> eslint .             (clean, 0 errors 0 warnings — run alongside)
+> vitest run           Test Files 26 passed | Tests 594 passed (was 472)
+                       Duration 85.50s
+> next build           ✓ prerendered as static content
+```
+
+**Shipped** — `src/game/sim/scoring/` replaces the P02 stub file:
+
+| File | What it owns |
+|---|---|
+| `flow.ts` | `F.flow` and `F.flowIdleTimer`, exclusively. Every gain, the grace window, decay, crash-zero, Fracture-restore. |
+| `overdrive.ts` | Arming rules, the 6.0s window, invulnerability, comedown to 25, `_START`/`_TICK`/`_END`. |
+| `score.ts` | Fixed-point integer accumulator, the multiplier, combo. |
+| `fracture.ts` | Escape-verb solver, the 1.2s real-time window, resume-or-end. |
+| `difficulty.ts` | The speed curve (moved out of `sim.ts`), the Flow bonus, the clamp, bands. |
+| `index.ts` | Sub-step ordering and event draining. |
+
+**Four prompt/doc conflicts, resolved toward the docs** (asked before writing code):
+
+1. **Score multiplier stays 3.0×**, not the proposed 4.0×. At 4.0× it would equal `overdriveMultiplier`, so spending 100 Flow on Overdrive would buy no multiplier at all — and `tuning-invariants.test.ts:138` already asserted the ordering.
+2. **Overdrive does not touch worldSpeed.** The proposed +30% gives 28 × 1.3 = 36.4 against a LOCKED `maxSpeed` of 34, and voids all 43 P06 chunk proofs, every one computed at maxSpeed.
+3. **Perfect slide stays 4, Bit streak stays 3.** TUNING §9.1 states the slide < near-miss ordering as a rule; the proposed 8 inverts it.
+4. **`fractureTimeScale` stays 0.15**, not the proposed 0.25.
+
+The two genuinely new mechanics from the prompt were taken: **near-miss Flow now scales with proximity** (`nearMissScaleMin` 0.5) and a **forced roll awards +10** (`flowPerForcedRoll`). Both are documented as P08 DECISIONs in GAME_BIBLE §4.1.
+
+**Three bugs found and fixed**
+
+- **Overdrive ran one tick long.** 6.0 is not a sum of 1/60 doubles; after 360 subtractions the residue is +1.63e-14, which a naive `> 0` reads as still-running. Overdrive lasted 6.017s and the Fracture window 73 ticks instead of 72. This is exactly the bug P04 fixed centrally in `player/timer.ts`, and I had not reused it. Both now use `tickDown`.
+- **A successful Fracture did not restore Flow.** `resumeFromFracture` never touched the meter, so the player kept 100% of their pre-death Flow — making a Fracture strictly better than not crashing. Now restores `fractureFlowRetained` 50%.
+- **`Shift` was bound to SLIDE, not OVERDRIVE.** P03 bound it on the shooter "crouch" instinct and its unit test encoded the mistake. GAME_BIBLE §6.1 is explicit that Shift/F are Overdrive. Corrected in `keyboard.ts` and in the test.
+
+**Two balance findings — reported, NOT tuned away**
+
+- **Overdrive is a net score LOSS on distance alone in the first ~40 seconds.** Spending the meter forfeits the +6 u/s Flow bonus, and 4.0/3.0 does not cover it early on. Measured: 0.90× at t=0, breaking even near 60s, reaching 1.10× by 180s. Its real payload is invulnerability, the global magnet and shatter score — none of which exist yet, because nothing spawns. Pinned as a named test.
+- **A modelled expert spends 51.8% of the run invulnerable** — ~51 Overdrive triggers across a ~9m50s run. That is close to the failure mode TUNING §9.2 names for `overdriveExitFlow`. Not changed: the harness's 55% near-miss rate is invented, so this needs re-measuring at P07.
+
+**Balance report** — 1,000 runs × 3 profiles:
+
+```
+  profile   median dur    target   median dist   median score   pts/s   p90 score   peak Flow   OD/run
+  --------------------------------------------------------------------------------------------
+  novice        43.8s     45.0s          668m          967.5    22.1       2,276           6      0.0
+  mid           1m53s     2m00s         2341m         13,219   117.2      45,304          98      2.0
+  expert        9m50s     6m00s        16025m      339,209.5   574.5     556,660         100     51.0
+
+  score spread:     mid/novice 13.7x    expert/novice 350.6x    expert/mid 25.7x
+  duration spread:  mid/novice  2.6x    expert/novice  13.5x
+```
+
+⚠️ **Read the caveat before the numbers.** The generator is not wired into the live tick, so a simulated run has no geometry to hit and cannot die. Flow, score, speed and the crash path are the real sim; *when* the player dies is a model living in `tests/balance/balance.test.ts`. The three profiles' failure rates were **calibrated to the duration targets**, so the durations are an input, not a finding — reporting them as a result would be circular. The score columns are the real output, and the 350× score spread against a 13.5× duration spread is the Flow multiplier doing its job. **`tuning.ts` was not touched to make any of this land.**
+
+Expert overshoots at 9m50s against a 6m+ floor, so that target is met but the model is generous.
+
+**Format version 2 → 3.** Flow was pinned at 0 under v2, so it contributed nothing to `worldSpeed`; it now changes distance and therefore everything downstream. Three float slots appended (`scoreFixed`, `flowAtDeath`, `fractureTimer`), four run-level integers added, and intent bit 6 now carries OVERDRIVE. Every v2 replay re-simulates differently and is rejected on version. Bit 7 is the last free one.
+
+**Deliberately NOT done**
+
+- **The generator is still not wired live.** `sim/generator.ts` remains the P02 no-op. Everything that needs an obstacle therefore never fires in a real run: the forced-roll award, the perfect-slide award, near-miss Flow, Bit streaks, shatter score, and Fracture itself. All are unit-tested against hand-placed obstacles, all are dead in a live run. **This is the single biggest caveat on the phase.**
+- **Touch has no Overdrive binding.** GAME_BIBLE §6.2 wants a tap on the Flow meter, which needs a HUD hit target that does not exist until P14. Keyboard and gamepad are wired.
+- **`classifyContact` is still the odd/even placeholder** and obstacles still use a single 0.5u cube collider. P07.
+- **Shards are never granted in a real run**, so Fracture cannot arm outside tests.
+- The balance suite adds ~80s to `npm run test`.
+
+**What P07 needs from here:** wire the generator into step 4, replace `classifyContact` and the placeholder collider with the real catalogue, emit `Coin` with an `EntityType` payload (the scoring pass already reads it), and add the cross-check test P06 deferred — the solver's logical blocking model versus the real AABBs. Then re-run this balance harness against real deaths and treat *those* numbers as findings.
+
+---
 
 ### 2026-08-16 — P06 · Level generator — **Complete (not wired live)**
 

@@ -23,7 +23,7 @@ import { stepCollision } from "@/game/sim/collision";
 const DT = TUNING.sim.fixedDelta;
 
 function held(partial: Partial<Intent>): Intent {
-  return { lateral: 0, roll: 0, jump: false, slide: false, ...partial };
+  return { lateral: 0, roll: 0, jump: false, slide: false, overdrive: false, ...partial };
 }
 
 function addFatalObstacle(state: SimState): void {

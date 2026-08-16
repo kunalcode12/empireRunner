@@ -183,15 +183,17 @@ These two numbers are the difference between "the game is hard" and "the game is
 |---|---|---|---|---|---|---|
 | `flowMax` | — | **100** | 100 fixed | 🔒 | The meter is the UI. This is a constant; tune the rates, not the ceiling. | |
 | `nearMissRadius` | u | **0.45** | 0.25 – 0.70 | 🔒 | Near-misses require frame-perfect grazing; the primary Flow source dries up and Overdrive becomes unreachable. | Merely being in the same lane counts as a near-miss. Flow fills passively, Overdrive triggers constantly, and the whole escalation loop trivialises. Measured **surface to surface** between AABBs, not centre to centre. |
-| `flowPerNearMiss` | Flow | **6** | 3 – 12 | 🔒 | ~17 near-misses to fill the meter is already a lot; below 3 it is 30+ and nobody sees Overdrive. | Below 8 near-misses to full. Overdrive stops being an event. |
-| `flowPerPerfectSlide` | Flow | **4** | 2 – 8 | ⚙️ | Perfect slides stop being worth the risk over a lazy early slide. | Slide-heavy sections become the optimal Flow farm and the roll gets ignored. Kept under `flowPerNearMiss` on purpose. |
+| `flowPerNearMiss` | Flow | **6** | 3 – 12 | 🔒 | ~17 near-misses to fill the meter is already a lot; below 3 it is 30+ and nobody sees Overdrive. | Below 8 near-misses to full. Overdrive stops being an event. This is the award at **zero gap**; it scales down with distance, see below. |
+| `nearMissScaleMin` | × | **0.5** | 0.25 – 1.0 | ⚙️ | Only a frame-perfect graze pays, and the whole band between 0 and 0.45u is worthless. | At 1.0 the scaling is off and a 0.44u pass pays the same as a 0.02u one, which teaches "near enough is near enough". `gain = flowPerNearMiss * (min + (1 - min) * (1 - gap / nearMissRadius))`. Linear, because a curve needs the banned `Math.pow`. |
+| `flowPerPerfectSlide` | Flow | **4** | 2 – 8 | ⚙️ | Perfect slides stop being worth the risk over a lazy early slide. | Slide-heavy sections become the optimal Flow farm and the roll gets ignored. **Kept strictly under `flowPerNearMiss` on purpose** — a P08 proposal to raise this to 8 was rejected for inverting that rule. Asserted in `tests/sim/flow.test.ts`. |
+| `flowPerForcedRoll` | Flow | **10** | 4 – 16 | ⚙️ | The roll stays the only verb with no Flow attached, and the optimal line is "one face, graze everything". | Rolling dominates every other source and players roll on reflex rather than on read. Awarded only when the blocker was genuinely unbeatable by any other verb. |
 | `flowPerBitStreak` | Flow | **3** | 1 – 6 | ⚙️ | The streak is invisible and Bit lines become pure economy. | Coin-vacuuming outperforms risky play, which inverts the entire design thesis. |
 | `bitStreakInterval` | count | **10** | 5 – 25 | ⚙️ | Streak fires constantly and reads as noise. | The player never sees one and does not learn the system exists. |
 | `flowPerOverdriveCell` | Flow | **35** | 20 – 50 | 🔒 | The Cell is not worth diverting for. | Two Cells nearly fill the meter and Overdrive becomes a pickup-luck outcome rather than an earned one. |
 | `flowPerShard` | Flow | **10** | 0 – 20 | ⚙️ | — | Shards start being chased for Flow rather than for Fracture. |
 | `flowDecayPerSecond` | Flow/s | **1.5** | 0.5 – 4.0 | 🔒 | Flow ratchets upward and never falls; a mediocre player reaches 100 by attrition and Overdrive stops being an achievement. | ~67s from full to empty at 1.5/s. Above 4.0/s a clean, safe stretch of track actively punishes the player for surviving it. |
 | `flowDecayGrace` | s | **2.0** | 0.5 – 4.0 | ⚙️ | Decay bites between two near-misses in the same obstacle cluster, so tight play still bleeds. | The player can coast indefinitely by grazing one thing every few seconds. |
-| `flowMultiplierMax` | × | **3.0** | 2.0 – 5.0 | ⚙️ | Flow's score contribution is invisible next to distance score. | Flow score dwarfs everything and low-Flow runs stop being worth banking. `scoreMultiplier = 1.0 + (flowMultiplierMax - 1.0) * flow / 100`. |
+| `flowMultiplierMax` | × | **3.0** | 2.0 – 5.0 | ⚙️ | Flow's score contribution is invisible next to distance score. | Flow score dwarfs everything and low-Flow runs stop being worth banking. `scoreMultiplier = 1.0 + (flowMultiplierMax - 1.0) * flow / 100`. **Must stay strictly below `overdriveMultiplier`** or spending 100 Flow on Overdrive buys no multiplier at all and the mechanic stops being a decision — a P08 proposal to raise this to 4.0 was rejected on exactly that ground. Asserted in `tuning-invariants.test.ts`. |
 | `flowGainMultiplier` | × | **1.0** | 1.0 – 1.65 | 🔧 | Product of the Flow Gain upgrade tier and the avatar passive. Applies to every gain row above; never to decay. |
 
 ### 9.2 Overdrive
@@ -200,7 +202,7 @@ These two numbers are the difference between "the game is hard" and "the game is
 |---|---|---|---|---|---|---|
 | `overdriveDuration` | s | **6.0** | 4.0 – 10.0 | 🔒 | The palette inversion barely lands before it ends; the spend feels wasted. | Long stretches of invulnerability are boring — there is no tension, and the player is just watching. 6s is roughly 170u at `speedCeiling`. |
 | `overdriveMultiplier` | × | **4.0** | 3.0 – 6.0 | 🔒 | Not worth 100 Flow versus simply holding a 3.0× multiplier. | Score becomes an Overdrive-uptime optimisation problem and nothing else matters. |
-| `overdriveExitFlow` | Flow | **25** | 0 – 40 | ⚙️ | 0 makes using the mechanic feel like a punishment; the player exits into a dead meter. | Above 40 the player chains Overdrives with barely any play between them. |
+| `overdriveExitFlow` | Flow | **25** | 0 – 40 | ⚙️ | 0 makes using the mechanic feel like a punishment; the player exits into a dead meter. | Above 40 the player chains Overdrives with barely any play between them. ⚠️ **The P08 balance harness measured a modelled expert at 51.8% Overdrive uptime at the current value of 25** — already close to that failure mode. Not changed, because the harness's near-miss rate is invented; re-measure at P07 against real geometry before touching it. |
 | `overdriveCost` | Flow | **100** | 100 fixed | 🔒 | The full meter. This is the deal. | |
 | `overdriveShatterScore` | pts | **25** | 10 – 60 | ⚙️ | Shattering feels weightless. | Ramming obstacles beats dodging them, which is the wrong lesson to teach mid-power-fantasy. |
 | `overdriveBloomIntensity` | — | **0.85** | 0.4 – 1.4 | ⚙️ | The one moment bloom is allowed does not read. | Blows out the flat colour fields and destroys the print look at the worst possible moment. Renders at **half resolution** — see [ARCHITECTURE.md](./ARCHITECTURE.md) §6. |
@@ -211,7 +213,7 @@ These two numbers are the difference between "the game is hard" and "the game is
 |---|---|---|---|---|---|---|
 | `fractureWindow` | s | **1.2** | 0.8 – 2.0 | 🔒 | Below 0.8s of real time there is no room to read the frozen geometry; it becomes a coin flip and the skill framing is a lie. | Above 2.0s the player has time to deliberate, and Fracture degrades into the pay-to-continue button it exists to replace. **Real time, not scaled time.** |
 | `fractureTimeScale` | × | **0.15** | 0.05 – 0.35 | ⚙️ | Near-freeze looks like a bug rather than bullet time. | Not slow enough to read; the 1.2s window flies past. At 0.15, 1.2s real ≈ 8s of perceived world motion. |
-| `fractureLookback` | s | **0.40** | 0.2 – 0.8 | ⚙️ | Too short to find a clearing verb — the sim concludes nothing would have worked and Fracture never arms. | The "correct" verb is one the player could not plausibly still have been thinking about. |
+| `fractureLookback` | s | **0.40** | 0.2 – 0.8 | ⚙️ | ⚠️ **UNUSED as of P08.** The shipped solver tests the six verbs against the killing obstacle directly rather than replaying 0.40s of state — see [GAME_BIBLE.md](./GAME_BIBLE.md) §5.2 for why. Kept in the table because the value is still the right one if the snapshot ring is ever built. | |
 | `fractureInvulnerability` | s | **1.5** | 0.8 – 3.0 | ⚙️ | The player resumes directly into the next obstacle and dies instantly, which reads as theft of a Shard. | Free passage through a whole cluster. |
 | `fractureFlowRetained` | × | **0.50** | 0.25 – 0.75 | 🔒 | Fracture stops being worth a Shard. | The crash costs almost nothing and Flow loses its teeth. |
 | `maxFracturesPerRun` | count | **2** | 1 – 3 | ⚙️ | 1 makes a great run end to a single unlucky spawn. | 3+ turns a rare-currency skill test into a Shard-denominated score ladder. |
@@ -271,6 +273,7 @@ Density is authored as **obstacle events per 100m** and constrained by a hard re
 
 | Key | Unit | Default | Range | Status | Notes |
 |---|---|---|---|---|---|
+| `scoreFixedPointScale` | × | **1000** | 1000 fixed | 🔒 | Score is accumulated as an exact integer count of thousandths of a point, never as a float, so a 20-minute run cannot drift between a browser and the P12 validation server. Changing it changes every stored score. Note the score therefore tracks distance only to within `ticks × 0.5 / scale` = 36 points over 20 minutes; the increment is rounded, the total never is. |
 | `pointsPerMetre` | pts | **1.0** | 0.5 – 2.0 | ⚙️ | Base score rate before `scoreMultiplier`. |
 | `pointsPerBit` | pts | **10** | 5 – 25 | ⚙️ | Too low and Bits are pure economy with no score identity; too high and the game becomes coin-vacuuming. |
 | `pointsPerNearMiss` | pts | **50** | 20 – 150 | ⚙️ | Near-misses must pay in score as well as Flow, or they read as a Flow chore. |

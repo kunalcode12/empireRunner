@@ -53,10 +53,13 @@ export interface EdgeLatch {
   roll: number;
   jump: boolean;
   slide: boolean;
+  /** Held, like jump and slide. The sim ignores it below 100 Flow, so a hold
+   *  simply spends the meter the instant it fills — GAME_BIBLE §6. */
+  overdrive: boolean;
 }
 
 export function createEdgeLatch(): EdgeLatch {
-  return { lateral: 0, roll: 0, jump: false, slide: false };
+  return { lateral: 0, roll: 0, jump: false, slide: false, overdrive: false };
 }
 
 /** Records a one-shot lateral request. Newest wins. */
@@ -75,6 +78,7 @@ export function drainLatch(latch: EdgeLatch, out: Intent): void {
   out.roll = latch.roll;
   out.jump = latch.jump;
   out.slide = latch.slide;
+  out.overdrive = latch.overdrive;
   latch.lateral = 0;
   latch.roll = 0;
 }
@@ -85,6 +89,7 @@ export function resetLatch(latch: EdgeLatch): void {
   latch.roll = 0;
   latch.jump = false;
   latch.slide = false;
+  latch.overdrive = false;
 }
 
 /**
@@ -103,4 +108,5 @@ export function mergeInto(out: Intent, next: Readonly<Intent>): void {
   }
   out.jump = out.jump || next.jump;
   out.slide = out.slide || next.slide;
+  out.overdrive = out.overdrive || next.overdrive;
 }

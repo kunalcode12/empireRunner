@@ -15,19 +15,23 @@ import { createIntent, type Intent } from "@/game/sim/intent";
 import { createSim } from "@/game/sim/sim";
 import { createRng, nextInt } from "@/game/sim/rng";
 import { F, getF } from "@/game/sim/state";
+import { getScore } from "@/game/sim/scoring/score";
 
 const HEADER_BYTES = TUNING.replay.headerBytes;
 const TICK_RATE = TUNING.sim.tickRate;
 const RUN_SEED = 0x5eed1234;
 
-/** Every legal intent combination: 3 lateral x 3 roll x 2 jump x 2 slide = 36. */
+/** Every legal combination: 3 lateral x 3 roll x 2 jump x 2 slide x 2 overdrive = 72.
+ *  Overdrive joined the byte at v3, in bit 6 that v2 required to be zero. */
 function allIntents(): Intent[] {
   const out: Intent[] = [];
   for (const lateral of [-1, 0, 1]) {
     for (const roll of [-1, 0, 1]) {
       for (const jump of [false, true]) {
         for (const slide of [false, true]) {
-          out.push({ lateral, roll, jump, slide });
+          for (const overdrive of [false, true]) {
+            out.push({ lateral, roll, jump, slide, overdrive });
+          }
         }
       }
     }
@@ -52,8 +56,11 @@ describe("intent bit packing", () => {
     }
   });
 
-  it("uses only the low 6 bits", () => {
-    const RESERVED_MASK = 0b11000000;
+  it("uses only the low 7 bits, leaving one spare", () => {
+    // Bit 6 became OVERDRIVE at v3. Bit 7 is the last one free — spend it
+    // deliberately, because the next verb after that costs a second byte per
+    // tick and doubles every stored replay.
+    const RESERVED_MASK = 0b10000000;
     for (const intent of allIntents()) {
       expect(packIntent(intent) & RESERVED_MASK).toBe(0);
     }
@@ -61,7 +68,7 @@ describe("intent bit packing", () => {
 
   it("gives every combination a distinct encoding", () => {
     const codes = new Set(allIntents().map(packIntent));
-    expect(codes.size).toBe(36);
+    expect(codes.size).toBe(72);
   });
 });
 
@@ -101,7 +108,7 @@ describe("recording", () => {
 
   it("resets cleanly", () => {
     const recorder = createRecorder(RUN_SEED);
-    record(recorder, { lateral: 1, roll: -1, jump: true, slide: true });
+    record(recorder, { lateral: 1, roll: -1, jump: true, slide: true, overdrive: false });
     resetRecorder(recorder);
     expect(recorder.tickCount).toBe(0);
     expect(recorder.overflowed).toBe(false);
@@ -136,7 +143,7 @@ describe("60-second round trip", () => {
 
   it("serializes, deserializes and verifies to the same score", () => {
     const run = recordRun(RUN_SEED);
-    const expectedScore = getF(run.state, F.score);
+    const expectedScore = getScore(run.state);
     const expectedDistance = getF(run.state, F.distance);
 
     const bytes = serializeReplay(run.recorder, run.hash);
@@ -146,6 +153,13 @@ describe("60-second round trip", () => {
     expect(result.rejection).toBe(ReplayRejection.None);
     expect(result.score).toBe(expectedScore);
     expect(result.distance).toBe(expectedDistance);
+
+    // Guard against this assertion going vacuous. It did exactly that between
+    // P08 landing and the audit: `verify()` read the dead `F.score` slot, so
+    // both sides of the comparison were 0 and a broken server-side score — the
+    // authoritative number for the entire leaderboard — passed its own test.
+    expect(expectedScore).toBeGreaterThan(0);
+    expect(result.score).toBeGreaterThan(0);
     expect(result.hash).toBe(run.hash);
     expect(result.ticksSimulated).toBe(SIXTY_SECONDS_TICKS);
   });
@@ -273,6 +287,7 @@ describe("the anti-cheat", () => {
       roll: 1,
       jump: true,
       slide: true,
+      overdrive: false,
     });
 
     const result = verify(bytes);
@@ -299,7 +314,7 @@ describe("the anti-cheat", () => {
     // reading a claimed one, and an edit that changes nothing about the final
     // state changes nothing about the score either. There is nothing to gain.
     const { bytes, sim } = runAndSerialize(RUN_SEED, 600);
-    const honestScore = getF(sim.getState(), F.score);
+    const honestScore = getScore(sim.getState());
 
     const target = HEADER_BYTES + 300;
     const JUMP_BIT = 0b00010000;
@@ -323,7 +338,7 @@ describe("the anti-cheat", () => {
     const { bytes, sim } = runAndSerialize(RUN_SEED, 600);
     const result = verify(bytes);
 
-    expect(result.score).toBe(getF(sim.getState(), F.score));
+    expect(result.score).toBe(getScore(sim.getState()));
     expect(result.distance).toBeCloseTo(getF(sim.getState(), F.distance), 12);
     // Header is exactly the documented 20 bytes: no room for a score field.
     expect(HEADER_BYTES).toBe(20);

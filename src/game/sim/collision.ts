@@ -44,6 +44,7 @@ import {
   type Aabb,
 } from "./player/collider";
 import { applyFatal, applyStumble, CrashCause } from "./player";
+import { overdriveActive } from "./scoring/overdrive";
 import { F, type SimState } from "./state";
 
 const NEAR_MISS_RADIUS = TUNING.flow.nearMissRadius;
@@ -226,6 +227,7 @@ export function stepCollision(state: SimState, dt: number, events: EventRing): v
   // tick is the distance the obstacle travels.
   const relativeDz = -worldSpeed * dt;
   const invulnerable = (state.f[F.playerInvulnerableTimer] ?? 0) > 0;
+  const inOverdrive = overdriveActive(state);
 
   for (let i = 0; i < obstacles.count; i += 1) {
     if (obstacles.active[i] !== 1) {
@@ -275,6 +277,18 @@ export function stepCollision(state: SimState, dt: number, events: EventRing): v
       continue;
     }
 
+    // Overdrive: obstacles shatter on contact and are removed from the sim,
+    // rather than killing. GAME_BIBLE §4.3. Checked before the plain
+    // invulnerability branch because a shatter is a scoring event, not a
+    // non-event — the score award is the whole reward for ramming during the
+    // one window where ramming is free.
+    if (inOverdrive) {
+      obstacles.flags[i] = flags | EntityFlag.Resolved | EntityFlag.Shattered;
+      obstacles.active[i] = 0;
+      emit(events, SimEvent.Shatter, state.tick, i, obstacles.kind[i] ?? 0);
+      continue;
+    }
+
     if (invulnerable) {
       obstacles.flags[i] = flags | EntityFlag.Resolved;
       continue;
@@ -285,7 +299,7 @@ export function stepCollision(state: SimState, dt: number, events: EventRing): v
     if (contact === ContactClass.Stumble) {
       applyStumble(state, events);
     } else {
-      applyFatal(state, events, CrashCause.Obstacle);
+      applyFatal(state, events, CrashCause.Obstacle, i);
       return;
     }
   }

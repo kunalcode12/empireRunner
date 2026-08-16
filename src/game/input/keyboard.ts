@@ -25,7 +25,11 @@ import {
 const LANE_LEFT_KEYS = ["KeyA", "ArrowLeft"] as const;
 const LANE_RIGHT_KEYS = ["KeyD", "ArrowRight"] as const;
 const JUMP_KEYS = ["Space", "KeyW", "ArrowUp"] as const;
-const SLIDE_KEYS = ["KeyS", "ArrowDown", "ShiftLeft", "ShiftRight"] as const;
+// Shift is deliberately NOT here. It reads as "crouch" from every shooter, and
+// P03 bound it to slide on that instinct — but GAME_BIBLE §6.1 assigns Shift to
+// OVERDRIVE, and a key cannot be both. The bible wins; corrected at P08.
+const SLIDE_KEYS = ["KeyS", "ArrowDown"] as const;
+const OVERDRIVE_KEYS = ["ShiftLeft", "ShiftRight", "KeyF"] as const;
 const ROLL_LEFT_KEYS = ["KeyQ", "Comma"] as const;
 const ROLL_RIGHT_KEYS = ["KeyE", "Period"] as const;
 
@@ -56,6 +60,7 @@ export function createKeyboardSource(options: KeyboardSourceOptions): IntentSour
   // of two held jump keys does not drop the jump.
   let jumpHeldCount = 0;
   let slideHeldCount = 0;
+  let overdriveHeldCount = 0;
   const down = new Set<string>();
 
   function onKeyDown(event: Event): void {
@@ -84,6 +89,9 @@ export function createKeyboardSource(options: KeyboardSourceOptions): IntentSour
     } else if (includes(SLIDE_KEYS, code)) {
       slideHeldCount += 1;
       latch.slide = true;
+    } else if (includes(OVERDRIVE_KEYS, code)) {
+      overdriveHeldCount += 1;
+      latch.overdrive = true;
     }
   }
 
@@ -101,6 +109,9 @@ export function createKeyboardSource(options: KeyboardSourceOptions): IntentSour
     } else if (includes(SLIDE_KEYS, code)) {
       slideHeldCount = slideHeldCount > 0 ? slideHeldCount - 1 : 0;
       latch.slide = slideHeldCount > 0;
+    } else if (includes(OVERDRIVE_KEYS, code)) {
+      overdriveHeldCount = overdriveHeldCount > 0 ? overdriveHeldCount - 1 : 0;
+      latch.overdrive = overdriveHeldCount > 0;
     }
   }
 
@@ -109,6 +120,7 @@ export function createKeyboardSource(options: KeyboardSourceOptions): IntentSour
     down.clear();
     jumpHeldCount = 0;
     slideHeldCount = 0;
+    overdriveHeldCount = 0;
     resetLatch(latch);
   }
 
@@ -139,4 +151,5 @@ export const KEYBOARD_BINDINGS = {
   slide: SLIDE_KEYS,
   rollLeft: ROLL_LEFT_KEYS,
   rollRight: ROLL_RIGHT_KEYS,
+  overdrive: OVERDRIVE_KEYS,
 } as const;

@@ -242,6 +242,41 @@ describe("the rolling window", () => {
   });
 });
 
+describe("fillWindow is bounded", () => {
+  it("REGRESSION: a huge forward jump does not emit an unbounded burst", () => {
+    // This loop runs inside the tick once P07 wires the generator in. Driven by a
+    // caller-supplied distance, an unbounded version emits thousands of chunks in
+    // one frame on a large jump — the Head Start boost skips 300m — which is the
+    // same spiral the clock's maxTicksPerFrame guard exists to prevent.
+    const state = createLevelState();
+    const rng = createRng(77);
+    const emitted = fillWindow(state, rng, 0, 1_000_000);
+    expect(emitted).toBeLessThanOrEqual(WINDOW_CHUNKS + 1);
+  });
+
+  it("REGRESSION: a non-finite distance does not hang", () => {
+    const state = createLevelState();
+    const rng = createRng(78);
+    expect(fillWindow(state, rng, 0, Number.NaN)).toBeLessThanOrEqual(WINDOW_CHUNKS + 1);
+    expect(fillWindow(state, rng, 0, Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(
+      WINDOW_CHUNKS + 1,
+    );
+  });
+
+  it("still keeps up with normal play, called every tick", () => {
+    // The bound must not starve the window in the case that actually matters.
+    const state = createLevelState();
+    const rng = createRng(79);
+    let distance = 0;
+    const perTick = TUNING.speed.maxSpeed * TUNING.sim.fixedDelta;
+    for (let i = 0; i < 20_000; i += 1) {
+      distance += perTick;
+      fillWindow(state, rng, 0, distance);
+      expect(state.nextDistance).toBeGreaterThanOrEqual(distance);
+    }
+  });
+});
+
 describe("allocation", () => {
   it("generating 1,000 chunks allocates nothing beyond the initial pool", () => {
     const state = createLevelState();

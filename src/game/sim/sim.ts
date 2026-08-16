@@ -9,11 +9,11 @@
  * ## The tick order is a contract
  *
  *   1. input      sanitise and latch this tick's intent
- *   2. player     verb state machine, gravity, lane/roll motion        [P04 stub]
+ *   2. player     verb state machine, gravity, lane/roll motion
  *   3. world      advance the speed curve, accumulate distance, band
  *   4. spawn      generate obstacles and pickups ahead                 [P06 stub]
- *   5. collision  swept AABB, pickups, near-miss, fatal contact        [P07 stub]
- *   6. scoring    Flow, multiplier, Overdrive                          [P08 stub]
+ *   5. collision  swept AABB, pickups, near-miss, fatal contact        [P07 partial]
+ *   6. scoring    Flow, multiplier, Overdrive, Fracture
  *   7. events     finalise the tick and emit
  *
  * Reordering these changes results. Player before world means the player acts on
@@ -22,8 +22,9 @@
  * choice is baked into every stored replay. **Changing this order requires
  * bumping `TUNING.replay.formatVersion`.**
  *
- * Steps 2, 4, 5 and 6 are no-op stubs in P02. See each module's header for the
- * phase that implements it.
+ * Step 4 is still a no-op stub: P06 built and proved the level generator but
+ * deliberately did not wire it into the live tick, so **nothing spawns yet** and
+ * step 5 runs against an empty array in normal play.
  */
 
 import { TUNING } from "../config/tuning";
@@ -41,12 +42,11 @@ import {
   serializeRng,
   type RngState,
 } from "./rng";
-import { stepScoring } from "./scoring";
+import { stepDifficulty, stepScoring } from "./scoring";
 import {
   copyState,
   createState,
   F,
-  Phase,
   resetState,
   RunStatus,
   type RngSeeds,
@@ -54,14 +54,7 @@ import {
 } from "./state";
 
 const FIXED_DELTA = TUNING.sim.fixedDelta;
-const SPEED_APPROACH = TUNING.determinism.speedApproachPerTick;
 const BASE_SPEED = TUNING.speed.baseSpeed;
-const SPEED_CEILING = TUNING.speed.speedCeiling;
-const MAX_SPEED = TUNING.speed.maxSpeed;
-const FLOW_SPEED_BONUS = TUNING.speed.flowSpeedBonus;
-const FLOW_MAX = TUNING.flow.flowMax;
-const BANDS = TUNING.spawn.bands;
-const STUMBLE_SPEED_PENALTY = TUNING.collision.stumbleSpeedPenalty;
 
 export interface Sim {
   /** Advances exactly one fixed timestep. */
@@ -140,58 +133,6 @@ export function createSim(seed: number): Sim {
     emit(events, SimEvent.RunStart, 0, currentSeed);
   }
 
-  /**
-   * Step 3 — world scroll.
-   *
-   * The speed curve is integrated incrementally rather than evaluated in closed
-   * form, because `Math.exp` is only "implementation-approximated" by ECMA-262
-   * and browsers do not agree on its last ulp. See TUNING.determinism for the
-   * full reasoning and the frozen constant. This form uses nothing but multiply
-   * and add, which IEEE-754 specifies exactly.
-   *
-   * Law (b): distance is an accumulated scalar. The player's z does not move.
-   */
-  function stepWorld(state: SimState): void {
-    // Indexed directly rather than through the getF/setF helpers. Those are
-    // fine at the edges, but passing a double across a call boundary that V8
-    // declines to inline boxes it into a HeapNumber — 16 bytes, every tick.
-    // Measured: the helper form cost ~16 bytes/tick, this form costs nothing.
-    const f = state.f;
-
-    const timeSpeed = f[F.timeSpeed] ?? 0;
-    const nextTimeSpeed = timeSpeed + (SPEED_CEILING - timeSpeed) * SPEED_APPROACH;
-    f[F.timeSpeed] = nextTimeSpeed;
-
-    const flowBonus = FLOW_SPEED_BONUS * ((f[F.flow] ?? 0) / FLOW_MAX);
-    const target = nextTimeSpeed + flowBonus;
-    const capped = target > MAX_SPEED ? MAX_SPEED : target;
-
-    // A stumble is a setback, not a death: the world slows while the player
-    // recovers. Applied after the clamp so the penalty is always felt, even at
-    // maxSpeed where the clamp would otherwise absorb it.
-    const worldSpeed =
-      state.player.phase === Phase.Stumbling ? capped * STUMBLE_SPEED_PENALTY : capped;
-    f[F.worldSpeed] = worldSpeed;
-
-    f[F.distance] = (f[F.distance] ?? 0) + worldSpeed * FIXED_DELTA;
-  }
-
-  /** Step 3b — difficulty band, derived from distance. Emits on transition. */
-  function stepBand(state: SimState): void {
-    const previousBand = state.band;
-    const distance = state.f[F.distance] ?? 0;
-    let band = previousBand;
-    // Bands are contiguous and ascending (asserted in tuning-invariants), so a
-    // forward scan from the current band is correct and never walks backwards.
-    while (band + 1 < BANDS.length && distance >= (BANDS[band]?.toMetres ?? Infinity)) {
-      band += 1;
-    }
-    if (band !== previousBand) {
-      state.band = band;
-      emit(events, SimEvent.BandChange, state.tick, band);
-    }
-  }
-
   function tick(intent: Readonly<Intent>): void {
     if (current.runStatus === RunStatus.Ended) {
       return;
@@ -201,28 +142,42 @@ export function createSim(seed: number): Sim {
     // states to interpolate between (law (c)).
     copyState(previous, current);
 
+    // Where this tick's events begin. The scoring pass drains from here, so it
+    // sees exactly what this tick produced and nothing from any earlier one.
+    const eventCursor = events.head;
+
     // 1. input
     scratchIntent.lateral = intent.lateral;
     scratchIntent.roll = intent.roll;
     scratchIntent.jump = intent.jump;
     scratchIntent.slide = intent.slide;
+    scratchIntent.overdrive = intent.overdrive;
     sanitizeIntent(scratchIntent);
 
-    // 2. player                                                      [P04 stub]
-    stepPlayer(current, scratchIntent, FIXED_DELTA, events);
+    // A Fracture window suspends the run: the player is not moving, the world is
+    // crawling, and collision must not fire again on the obstacle that already
+    // killed them. Only the speed curve and the scoring pass run.
+    const inFracture = current.runStatus === RunStatus.Fracturing;
 
-    // 3. world
-    stepWorld(current);
-    stepBand(current);
+    // 2. player
+    if (!inFracture) {
+      stepPlayer(current, scratchIntent, FIXED_DELTA, events);
+    }
 
-    // 4. spawn                                                       [P06 stub]
-    stepGenerator(current, generatorRng, pickupRng, events);
+    // 3. world — owned by scoring/difficulty.ts, called here so the tick order
+    //    is unchanged from P02. Returns the metres the odometer advanced.
+    const metres = stepDifficulty(current, events);
 
-    // 5. collision                                                   [P07 stub]
-    stepCollision(current, FIXED_DELTA, events);
+    if (!inFracture) {
+      // 4. spawn                                                     [P06 stub]
+      stepGenerator(current, generatorRng, pickupRng, events);
 
-    // 6. scoring                                                     [P08 stub]
-    stepScoring(current, FIXED_DELTA, events);
+      // 5. collision
+      stepCollision(current, FIXED_DELTA, events);
+    }
+
+    // 6. scoring
+    stepScoring(current, scratchIntent, FIXED_DELTA, events, eventCursor, metres);
 
     // 7. events — advance time and persist RNG positions into the state, so a
     //    snapshot or a hash captures the generator's exact position.

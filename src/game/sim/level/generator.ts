@@ -387,9 +387,27 @@ export function generateNext(state: LevelState, rng: RngState, flow: number): Pl
 }
 
 /**
+ * u — how far the window may be topped up in a single call.
+ *
+ * One window's worth plus a chunk of slack. In steady state the player advances
+ * well under a chunk per tick, so this never binds; it exists for the cases where
+ * `playerDistance` jumps — the Head Start boost skipping 300m, a debug warp, or a
+ * caller that simply forgot to call this for a while.
+ */
+const MAX_FILL_CHUNKS = WINDOW_CHUNKS + 1;
+
+/**
  * Tops the window up so there are always `windowChunks` ahead of the player.
  *
- * @returns how many chunks were emitted this call.
+ * **Bounded, deliberately.** This is a `while` loop driven by a caller-supplied
+ * distance, and it will run inside the tick once P07 wires the generator in. An
+ * unbounded version hangs the tick outright on a NaN or Infinity distance, and
+ * on a large forward jump it emits an unbounded burst of chunks in one frame —
+ * the same spiral the clock's `maxTicksPerFrame` guard exists to prevent, in a
+ * different place. Surplus is left for the next call rather than simulated.
+ *
+ * @returns how many chunks were emitted this call, never more than
+ *          `MAX_FILL_CHUNKS`.
  */
 export function fillWindow(
   state: LevelState,
@@ -397,9 +415,12 @@ export function fillWindow(
   flow: number,
   playerDistance: number,
 ): number {
+  // A non-finite distance is a caller bug, but it must not spin forever.
+  const distance = Number.isFinite(playerDistance) ? playerDistance : state.nextDistance;
+  const target = distance + WINDOW_CHUNKS * CHUNK_LENGTH;
+
   let emitted = 0;
-  const target = playerDistance + WINDOW_CHUNKS * CHUNK_LENGTH;
-  while (state.nextDistance < target) {
+  while (state.nextDistance < target && emitted < MAX_FILL_CHUNKS) {
     generateNext(state, rng, flow);
     emitted += 1;
   }

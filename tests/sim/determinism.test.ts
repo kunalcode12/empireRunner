@@ -5,6 +5,7 @@ import { createIntent, type Intent } from "@/game/sim/intent";
 import { createRng, nextInt } from "@/game/sim/rng";
 import { formatHash } from "@/game/sim/hash";
 import { F, getF, RunStatus } from "@/game/sim/state";
+import { getScore } from "@/game/sim/scoring/score";
 
 /**
  * Law (a) — docs/ARCHITECTURE.md §2a.
@@ -27,6 +28,7 @@ function buildInputLog(seed: number, ticks: number): Intent[] {
       roll: nextInt(rng, 0, AXIS_CHOICES) - 1,
       jump: nextInt(rng, 0, BOOL_CHOICES) === 1,
       slide: nextInt(rng, 0, BOOL_CHOICES) === 1,
+      overdrive: nextInt(rng, 0, BOOL_CHOICES) === 1,
     });
   }
   return log;
@@ -79,7 +81,7 @@ describe("determinism: same seed + same input log", () => {
     const a = createSim(RUN_SEED);
     const b = createSim(RUN_SEED);
     const idle = createIntent();
-    const jumping: Intent = { lateral: 0, roll: 0, jump: true, slide: false };
+    const jumping: Intent = { lateral: 0, roll: 0, jump: true, slide: false, overdrive: false };
 
     for (let i = 0; i < 20; i += 1) {
       a.tick(idle);
@@ -95,7 +97,7 @@ describe("determinism: same seed + same input log", () => {
     const a = createSim(RUN_SEED);
     const b = createSim(RUN_SEED);
     const idle = createIntent();
-    const right: Intent = { lateral: 1, roll: 0, jump: false, slide: false };
+    const right: Intent = { lateral: 1, roll: 0, jump: false, slide: false, overdrive: false };
 
     b.tick(right);
     a.tick(idle);
@@ -116,7 +118,7 @@ describe("determinism: same seed + same input log", () => {
     const a = createSim(RUN_SEED);
     const b = createSim(RUN_SEED);
     const idle = createIntent();
-    const jumping: Intent = { lateral: 0, roll: 0, jump: true, slide: false };
+    const jumping: Intent = { lateral: 0, roll: 0, jump: true, slide: false, overdrive: false };
 
     for (let i = 0; i < 100; i += 1) {
       a.tick(idle);
@@ -205,7 +207,7 @@ describe("cross-run isolation: reset(seed) leaks nothing", () => {
     expect(s.tick).toBe(0);
     expect(getF(s, F.elapsed)).toBe(0);
     expect(getF(s, F.distance)).toBe(0);
-    expect(getF(s, F.score)).toBe(0);
+    expect(getScore(s)).toBe(0);
     expect(getF(s, F.flow)).toBe(0);
     expect(s.band).toBe(0);
     expect(getF(s, F.timeSpeed)).toBe(TUNING.speed.baseSpeed);

@@ -49,8 +49,24 @@ export const F = {
   timeSpeed: 2,
   /** u/s — timeSpeed plus the Flow bonus, clamped to maxSpeed. */
   worldSpeed: 3,
-  /** pts — run score. */
-  score: 4,
+  /**
+   * DEAD SLOT — do not read, do not write.
+   *
+   * This was the P02 score. P08 replaced it with `scoreFixed` (slot 27), which
+   * holds an exact integer count of thousandths of a point rather than a float,
+   * for the drift reasons in scoring/score.ts. Nothing writes here any more, so
+   * it is permanently 0.
+   *
+   * Renamed rather than deleted: the slot order is baked into every state hash,
+   * so removing it would silently shift 25 other slots. Renamed rather than left
+   * as `score`, because it read exactly like the field a caller wants and
+   * `verify()` in replay.ts duly reported a score of 0 for every submitted
+   * replay — the authoritative server-side number for the whole leaderboard.
+   * Three replay tests passed throughout, comparing 0 against 0.
+   *
+   * Use `getScore(state)` from scoring/score.ts.
+   */
+  scoreLegacyUnused: 4,
   /** 0..100 — the Flow meter. */
   flow: 5,
   /** s — time since the last Flow gain, for the decay grace window. */
@@ -98,10 +114,24 @@ export const F = {
   playerSlideTimer: 25,
   /** s — remaining slide stand-up tail. Jump is illegal until this reaches zero. */
   playerSlideRecoveryTimer: 26,
+
+  // ── P08 — scoring, Flow, Fracture ──────────────────────────────────────────
+  /** thousandths of a point — the score accumulator.
+   *
+   *  Always an exact integer. See `TUNING.scoring.scoreFixedPointScale` for why
+   *  the score is never a float. Read it through `getScore()` in scoring/score.ts,
+   *  which divides and floors; do not read this slot directly for display. */
+  scoreFixed: 27,
+  /** 0..100 — Flow at the instant of the fatal hit, so a successful Fracture can
+   *  restore `fractureFlowRetained` of it. Meaningless outside a Fracture. */
+  flowAtDeath: 28,
+  /** s — remaining Fracture input window, in REAL seconds, not scaled ones.
+   *  TUNING §9.3 is explicit that `fractureWindow` is real time. */
+  fractureTimer: 29,
 } as const;
 
 /** Number of Float64 slots. Keep in step with `F`. */
-export const FLOAT_SLOTS = 27;
+export const FLOAT_SLOTS = 30;
 
 export type FloatSlot = (typeof F)[keyof typeof F];
 
@@ -183,6 +213,10 @@ export interface PlayerState {
   cornerForgiveCount: number;
   /** count — stumbles this run. */
   stumbleCount: number;
+  /** count — Shards held. Spent to arm a Fracture, at `fractureShardCost` each.
+   *  Distinct from `shields`: a shield absorbs a hit automatically, a Shard buys
+   *  the right to attempt the skill test. */
+  shards: number;
 }
 
 /**
@@ -221,6 +255,21 @@ export interface SimState {
   band: number;
   /** count — Fractures spent this run. */
   fracturesUsed: number;
+
+  // ── P08 — scoring and Flow counters. Integers, so they stay Smis. ───────────
+  /** count — consecutive Bits collected. Resets on a miss or a crash. Every
+   *  `bitStreakInterval` awards `flowPerBitStreak`. */
+  bitStreak: number;
+  /** count — consecutive scoring events without a stumble or a crash.
+   *  A STATISTIC, not a multiplier: the score multiplier is Flow's job alone, and
+   *  stacking a second multiplier on top would make the two impossible to tune
+   *  independently. Surfaced on the death screen at P14. */
+  combo: number;
+  /** count — highest `combo` reached this run. */
+  bestCombo: number;
+  /** Verb — the single verb that would have cleared the death, while a Fracture
+   *  window is open. `Verb.None` at all other times. */
+  fractureVerb: number;
   /** int32 — serialised generator stream. Signed to stay a Smi; read with `>>> 0`. */
   rngGenerator: number;
   /** int32 — serialised pickup stream. */
@@ -290,6 +339,10 @@ export function createState(): SimState {
     runStatus: RunStatus.Idle,
     band: 0,
     fracturesUsed: 0,
+    bitStreak: 0,
+    combo: 0,
+    bestCombo: 0,
+    fractureVerb: Verb.None,
     rngGenerator: 0,
     rngPickup: 0,
     rngCosmetic: 0,
@@ -307,6 +360,7 @@ export function createState(): SimState {
       targetLane: 1,
       cornerForgiveCount: 0,
       stumbleCount: 0,
+      shards: 0,
     },
     obstacles: createEntityColumns(MAX_OBSTACLES),
     pickups: createEntityColumns(MAX_PICKUPS),
@@ -332,6 +386,10 @@ export function resetState(state: SimState, seeds: RngSeeds): void {
   state.runStatus = RunStatus.Idle;
   state.band = 0;
   state.fracturesUsed = 0;
+  state.bitStreak = 0;
+  state.combo = 0;
+  state.bestCombo = 0;
+  state.fractureVerb = Verb.None;
   state.rngGenerator = seeds.generator | 0;
   state.rngPickup = seeds.pickup | 0;
   state.rngCosmetic = seeds.cosmetic | 0;
@@ -350,6 +408,7 @@ export function resetState(state: SimState, seeds: RngSeeds): void {
   player.targetLane = 1;
   player.cornerForgiveCount = 0;
   player.stumbleCount = 0;
+  player.shards = 0;
 
   resetEntityColumns(state.obstacles);
   resetEntityColumns(state.pickups);
@@ -380,6 +439,10 @@ export function copyState(dst: SimState, src: SimState): void {
   dst.runStatus = src.runStatus;
   dst.band = src.band;
   dst.fracturesUsed = src.fracturesUsed;
+  dst.bitStreak = src.bitStreak;
+  dst.combo = src.combo;
+  dst.bestCombo = src.bestCombo;
+  dst.fractureVerb = src.fractureVerb;
   dst.rngGenerator = src.rngGenerator;
   dst.rngPickup = src.rngPickup;
   dst.rngCosmetic = src.rngCosmetic;
@@ -397,6 +460,7 @@ export function copyState(dst: SimState, src: SimState): void {
   dst.player.targetLane = src.player.targetLane;
   dst.player.cornerForgiveCount = src.player.cornerForgiveCount;
   dst.player.stumbleCount = src.player.stumbleCount;
+  dst.player.shards = src.player.shards;
 
   copyEntityColumns(dst.obstacles, src.obstacles);
   copyEntityColumns(dst.pickups, src.pickups);

@@ -148,8 +148,15 @@ export const TUNING = {
      *  v2 (P04): the player controller landed. Intents that were inert under v1
      *  now move the player, and `jump`/`slide` changed meaning from "pressed" to
      *  "held" so variable jump height can read the release edge. Every v1 replay
-     *  would re-simulate to a different result and is therefore rejected. */
-    formatVersion: 2,
+     *  would re-simulate to a different result and is therefore rejected.
+     *
+     *  v3 (P08): Flow became non-zero. Under v2 `flow` was pinned at 0 by the
+     *  scoring stub, so the Flow speed bonus contributed nothing and every run
+     *  followed the time curve alone. It now feeds `worldSpeed`, which changes
+     *  distance, which changes everything downstream. Three float slots were also
+     *  appended (state hash changed) and intent bit 6 now carries OVERDRIVE, which
+     *  was previously required to be zero. */
+    formatVersion: 3,
 
     /** bytes — fixed header size. magic(4) version(1) flags(1) tickRate(2)
      *  seed(4) tickCount(4) finalHash(4). DERIVED from the layout in replay.ts. */
@@ -337,8 +344,24 @@ export const TUNING = {
     flowMax: 100,
     /** u — surface-to-surface AABB distance that counts as a near-miss. LOCKED. */
     nearMissRadius: 0.45,
-    /** Flow — per near-miss. One award per obstacle instance, ever. LOCKED. */
+    /** Flow — per near-miss at zero gap. One award per obstacle instance, ever. LOCKED.
+     *
+     *  Scaled down toward `nearMissScaleMin` as the gap widens — see below. */
     flowPerNearMiss: 6,
+
+    /** x — fraction of `flowPerNearMiss` awarded for a near-miss at exactly
+     *  `nearMissRadius`, rising linearly to 1.0 at zero gap.
+     *
+     *      gain = flowPerNearMiss * (min + (1 - min) * (1 - gap / nearMissRadius))
+     *
+     *  P08 addition, NOT in GAME_BIBLE §4.1's flat +6. The flat award pays a graze
+     *  at 0.44u exactly as much as one at 0.02u, which teaches the player that
+     *  "near enough" is near enough. Scaling makes the last centimetre worth
+     *  something and is the cheapest way to reward precision over adequacy.
+     *
+     *  Linear on purpose: a curve here would need `Math.pow`, which is banned in
+     *  the sim for the P12 cross-engine reason. OPEN. */
+    nearMissScaleMin: 0.5,
     /** Flow — per slide clearing a Low Bar within perfectSlideMargin. OPEN.
      *  Deliberately below flowPerNearMiss so slide-farming cannot out-earn risk. */
     flowPerPerfectSlide: 4,
@@ -346,6 +369,18 @@ export const TUNING = {
     flowPerBitStreak: 3,
     /** count — consecutive Bits per streak award. OPEN. */
     bitStreakInterval: 10,
+    /** Flow — clearing a roll that was FORCED, i.e. a blocker the player could not
+     *  have passed by any other verb.
+     *
+     *  P08 addition, NOT in GAME_BIBLE §4.1. The roll is the signature verb and
+     *  was the only one of the six with no Flow source attached to it, which made
+     *  the optimal Flow line "stay on one face and graze things" — the exact
+     *  opposite of what the game is about. Set above `flowPerNearMiss` 6 so a
+     *  forced roll is the single most valuable non-pickup event in the game.
+     *
+     *  Awarded once per blocking obstacle instance, on roll completion. OPEN. */
+    flowPerForcedRoll: 10,
+
     /** Flow — Overdrive Cell pickup. LOCKED. */
     flowPerOverdriveCell: 35,
     /** Flow — Shard pickup. OPEN. */
@@ -605,6 +640,24 @@ export const TUNING = {
   //   effect(tier) = Emax * (1 - k^tier) / (1 - k^5),  k=0.6, tier 0..5
   // ───────────────────────────────────────────────────────────────────────────
   scoring: {
+    /** x — fixed-point denominator for the score accumulator.
+     *
+     *  Score is accumulated as an INTEGER count of thousandths of a point, never
+     *  as a float. A 20-minute run at ~34 u/s under a 4x multiplier accrues about
+     *  1.6e8 thousandths, which is exact in a double (integers are exact to 2^53,
+     *  ~9.0e15) with eight orders of magnitude to spare.
+     *
+     *  Why it matters: `score += rate * dt * multiplier` in floating point drifts.
+     *  Each add rounds, the error is a function of the running magnitude, and
+     *  after 72,000 ticks two machines that agree on every input can disagree on
+     *  the total. P12 re-simulates replays server-side and compares — a one-unit
+     *  disagreement rejects an honest player. Integers cannot drift.
+     *
+     *  1000 gives milli-point resolution, so a single tick of distance score at
+     *  the lowest rate still registers rather than truncating to zero. LOCKED —
+     *  changing it changes every stored score. */
+    scoreFixedPointScale: 1000,
+
     /** pts/m — base score rate before scoreMultiplier. OPEN. */
     pointsPerMetre: 1.0,
     /** pts — per Bit collected. OPEN. */
@@ -664,8 +717,66 @@ export const TUNING = {
     cameraHeight: 2.6,
     /** deg — vertical field of view at baseSpeed. OPEN. */
     cameraFov: 62,
-    /** deg — added to cameraFov, lerped from baseSpeed to maxSpeed. OPEN. */
-    cameraSpeedFovBoost: 8,
+
+    /** deg — added to cameraFov, lerped from baseSpeed to maxSpeed. OPEN.
+     *
+     *  Raised from 8 to 20 at P05, taking the maximum FOV to 82. This is
+     *  deliberately **outside** the 0–15 range TUNING.md §13 originally gave, and
+     *  the range there has been widened to 0–20 to match rather than the value
+     *  quietly exceeding its own documented bound.
+     *
+     *  The reasoning is that FOV widening is most of what makes speed read on a
+     *  flat-shaded scene with no motion blur and no particles — there is very
+     *  little else carrying the sensation at this art direction. The cost is the
+     *  documented one: FOV pumping is a nausea risk, so this must be on the
+     *  reduced-motion kill switch at P15, and it wants a real playtest before it
+     *  is treated as settled. */
+    cameraSpeedFovBoost: 20,
+
+    // ── P05 — camera rig dynamics ─────────────────────────────────────────────
+    //
+    // All three stiffnesses are exponential-damping RATES in 1/s, applied as
+    // `x += (target - x) * (1 - e^(-rate * dt))`. That form is frame-rate
+    // independent, unlike a raw `lerp(x, target, k)` which converges faster at
+    // higher frame rates and makes the camera feel different on a 144Hz monitor.
+    //
+    // `Math.exp` is fine here: the ban in eslint.config.mjs is scoped to
+    // src/game/sim/** because the sim has to be bit-reproducible for P12. The
+    // camera is presentation and never feeds back into the sim.
+    /** 1/s — lateral follow rate. Stiffest axis: lane changes must read as
+     *  decisive, and lateral lag is what makes a runner feel like it is on ice. */
+    cameraFollowLateral: 14.0,
+    /** 1/s — vertical follow rate. Deliberately softer than lateral so a jump
+     *  arcs out of frame slightly rather than the camera glueing to the apex. */
+    cameraFollowVertical: 7.0,
+    /** 1/s — depth follow rate. Softest: the player barely moves in z (law b). */
+    cameraFollowDepth: 5.0,
+
+    /** u — how far the camera leads in the direction of lane input, at full
+     *  deflection. Small on purpose; it is a hint, not a pan. OPEN. */
+    cameraLookAhead: 1.1,
+    /** 1/s — damping rate on the look-ahead offset. Low, so the lead drifts in
+     *  rather than snapping and fighting the lane tween. OPEN. */
+    cameraLookAheadDamping: 4.0,
+
+    /** 1/s — rate at which the camera's own roll chases the world's.
+     *
+     *  `rollCameraLerp` 0.85 is expressed as a per-frame lerp weight, which is
+     *  frame-rate dependent and therefore unusable directly. This is the same
+     *  intent as an exponential rate: 17/s reaches ~85% of the way in a 60Hz
+     *  frame, matching the original at the rate it was chosen on, while staying
+     *  identical at 144Hz. DERIVED from `roll.rollCameraLerp`. */
+    cameraRollRate: 17.0,
+
+    /** deg — how far the camera leans INTO a roll, on top of the world rotation.
+     *
+     *  The camera does not rigidly track the 90 degree world turn — that reads as
+     *  the screen flipping. It over-rotates slightly at the start and settles
+     *  back, which is what sells the roll as the player's action rather than the
+     *  world's. OPEN, needs a device playtest alongside GAME_BIBLE §13 Q1. */
+    cameraRollLean: 9.0,
+    /** 1/s — how fast the lean settles back out after the roll completes. OPEN. */
+    cameraRollSettle: 6.0,
     /** u — positional shake amplitude on a near-miss. Respects reduced-motion. OPEN. */
     cameraShakeOnNearMiss: 0.06,
     /** x — min(devicePixelRatio, this). Above 2 the fragment cost on high-DPI
@@ -682,6 +793,78 @@ export const TUNING = {
     bazaar: { near: 20, far: 70 },
     /** Static's fog is unstable and oscillates between these bounds. */
     staticTheme: { near: 6, far: 90, unstableMin: 20, unstableMax: 90 },
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 15b. Render layer — P05
+  //
+  // Presentation only. Nothing here is read by src/game/sim/**, and nothing here
+  // may change a gameplay outcome — if a number in this section could alter where
+  // the player ends up, it is in the wrong section.
+  // ───────────────────────────────────────────────────────────────────────────
+  render: {
+    /** u — length of one tunnel segment along z.
+     *
+     *  Independent of `spawn.chunkLength` 24u on purpose: a segment is a unit of
+     *  GEOMETRY and a chunk is a unit of GAMEPLAY. Tying them would mean any
+     *  change to chunk length silently re-tessellates the tunnel. 12u gives two
+     *  segments per chunk, which is enough to keep the recycle seam off-screen. */
+    tunnelSegmentLength: 12.0,
+
+    /** count — live tunnel segments in the recycling ring.
+     *
+     *  Must cover the longest fog distance (Bazaar, 70u) plus the camera's own
+     *  setback, or the player sees the world end. 24 x 12u = 288u, comfortably
+     *  past `pools.liveTrackLength` 240u. DERIVED-ish; re-check if fog moves. */
+    tunnelSegmentCount: 24,
+
+    /** u — how far behind the camera a segment must fall before it recycles to
+     *  the front. Beyond the near plane and beyond any plausible camera lean. */
+    tunnelRecycleBehind: 20.0,
+
+    /** count — instance-buffer capacity per obstacle geometry type.
+     *
+     *  Sized from `pools.maxObstacles` 256: any single geometry could in
+     *  principle account for every live obstacle, so each buffer is allocated for
+     *  the worst case. Instances beyond the live count are collapsed to zero
+     *  scale rather than removed, which keeps the draw count constant. */
+    maxInstancesPerGeometry: 256,
+
+    /** count — instance capacity for pickups. From `pools.maxPickups`. */
+    maxPickupInstances: 512,
+
+    /** px — directional shadow map edge length, by quality tier. 0 disables
+     *  shadow casting entirely, which is the first thing to cut on a phone. */
+    shadowMapHigh: 1024,
+    shadowMapMedium: 512,
+    shadowMapLow: 0,
+
+    /** u — half-extent of the directional light's orthographic shadow frustum.
+     *
+     *  Tight on purpose. A shadow camera sized to the whole tunnel spreads 1024px
+     *  over 288u and the shadows turn to mush; sized to the ~40u the player can
+     *  actually see, the same map is sharp. */
+    shadowFrustumHalfSize: 22.0,
+    /** u — near/far span of the shadow camera. */
+    shadowFrustumDepth: 80.0,
+
+    /** x — hemisphere fill intensity. Keeps unlit faces from going to flat black,
+     *  which GAME_BIBLE §11.3 bans outright. */
+    hemisphereIntensity: 0.55,
+    /** x — key directional intensity. */
+    directionalIntensity: 1.15,
+
+    /** u — the player's fixed z offset from the origin. Law (b): the player stays
+     *  near origin and the world moves past. Non-zero only so the camera has
+     *  something to sit behind. */
+    playerZ: 0.0,
+
+    /** s — minimum time the loading screen stays up once mounted.
+     *
+     *  Not a fake delay for polish: below this a fast load produces a single-frame
+     *  flash of the loading screen, which reads as a rendering glitch rather than
+     *  as loading. */
+    minLoadingSeconds: 0.35,
   },
 
   // ───────────────────────────────────────────────────────────────────────────

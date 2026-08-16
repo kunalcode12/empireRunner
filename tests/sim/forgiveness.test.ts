@@ -23,7 +23,7 @@ const COYOTE_TICKS = Math.round(COYOTE_TIME / DT);
 const BUFFER_TICKS = Math.round(INPUT_BUFFER / DT);
 
 function held(partial: Partial<Intent>): Intent {
-  return { lateral: 0, roll: 0, jump: false, slide: false, ...partial };
+  return { lateral: 0, roll: 0, jump: false, slide: false, overdrive: false, ...partial };
 }
 
 describe("coyote time fires at the boundary tick and not one past it", () => {

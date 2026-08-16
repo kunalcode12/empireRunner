@@ -148,7 +148,10 @@ export function createGamepadSource(options: GamepadSourceOptions): IntentSource
       // Held, not edge-triggered — the controller needs the release edge.
       latch.jump = isPressed(pad, BUTTON_A);
       latch.slide = isPressed(pad, BUTTON_B);
-      if (latch.jump || latch.slide || isPressed(pad, BUTTON_RT)) {
+      // RT was already read here for activity detection but had nowhere to go
+      // until the Intent gained an `overdrive` field at P08. GAME_BIBLE §6.3.
+      latch.overdrive = isPressed(pad, BUTTON_RT);
+      if (latch.jump || latch.slide || latch.overdrive) {
         lastActivity = now();
       }
 

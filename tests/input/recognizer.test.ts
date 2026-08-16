@@ -306,9 +306,15 @@ describe("keyboard", () => {
       ["Space", "jump", true],
       ["KeyW", "jump", true],
       ["KeyS", "slide", true],
-      ["ShiftLeft", "slide", true],
+      ["ArrowDown", "slide", true],
       ["KeyQ", "roll", -1],
       ["KeyE", "roll", 1],
+      // Shift is OVERDRIVE, not slide. P03 bound it to slide on the shooter
+      // "crouch" instinct and this test encoded that mistake; §6.1 is explicit
+      // that Shift and F are Overdrive. Corrected at P08.
+      ["ShiftLeft", "overdrive", true],
+      ["ShiftRight", "overdrive", true],
+      ["KeyF", "overdrive", true],
     ];
 
     for (const [code, field, expected] of cases) {
