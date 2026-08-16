@@ -50,11 +50,29 @@ export { PLAYER_DRAW_CALLS } from "./PlayerRig";
 export { seedWorldFromGenerator, devSeedingEnabled, type DevSeedOptions } from "./devSeed";
 
 /**
- * The scene's total draw calls, counted rather than measured.
+ * The scene's draw calls, flat regardless of how many entities are live.
  *
- * 4 tunnel faces + 4 obstacle buckets + 1 pickup mesh + 1 player = 10, flat,
- * regardless of how many entities are live. Against a budget of 100 that leaves
- * 90 for everything P07 through P14 adds — which is the point of counting it
- * here rather than discovering it later.
+ * ```
+ *   colour pass   4 tunnel faces + 4 obstacle buckets + 1 pickups + 1 player = 10
+ *   shadow pass   4 obstacle buckets + 1 player                              =  5
+ *                                                                    total    15
+ * ```
+ *
+ * **The shadow pass is the half that is easy to forget.** A shadow map is a
+ * second render of every *caster* from the light's point of view, so enabling
+ * `castShadow` on a mesh costs two draw calls, not one. The first count of this
+ * was 10 and the measured figure came back 15 — the difference is exactly the
+ * five casters. Worth stating plainly, because the instinct when adding geometry
+ * is to count it once.
+ *
+ * The tunnel only receives shadow and never casts it, which is why it does not
+ * appear in the second row. On LOW the shadow pass is off entirely and the
+ * scene costs 10.
+ *
+ * Against a budget of 100 desktop / 50 mobile, that leaves 85 and 35 for
+ * everything P07 through P14 adds. Measured, not estimated:
+ * `tests/e2e/perf.spec.ts`.
  */
-export const EXPECTED_DRAW_CALLS = 10;
+export const EXPECTED_DRAW_CALLS_COLOUR = 10;
+export const EXPECTED_SHADOW_CASTERS = 5;
+export const EXPECTED_DRAW_CALLS = EXPECTED_DRAW_CALLS_COLOUR + EXPECTED_SHADOW_CASTERS;

@@ -188,10 +188,7 @@ export function EntityRenderer({ handleRef }: EntityRendererProps): React.ReactE
   // A unit box per bucket, scaled per instance. One shared geometry would be
   // enough, but a separate one per bucket keeps the option of giving each a real
   // shape at P07 without restructuring anything here.
-  const geometries = useMemo(
-    () => BUCKET_SHAPES.map(() => new THREE.BoxGeometry(1, 1, 1)),
-    [],
-  );
+  const geometries = useMemo(() => BUCKET_SHAPES.map(() => new THREE.BoxGeometry(1, 1, 1)), []);
 
   const pickupGeometry = useMemo(() => {
     const COIN_RADIUS = 0.22;

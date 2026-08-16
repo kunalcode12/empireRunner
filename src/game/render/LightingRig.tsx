@@ -126,11 +126,7 @@ export function LightingRig({ handleRef }: LightingRigProps): React.ReactElement
         scratch.target.applyQuaternion(quat);
         target.position.copy(scratch.target);
 
-        scratch.position.set(
-          x + KEY_OFFSET.x,
-          -PRISM_SIZE * HALF + y + KEY_OFFSET.y,
-          KEY_OFFSET.z,
-        );
+        scratch.position.set(x + KEY_OFFSET.x, -PRISM_SIZE * HALF + y + KEY_OFFSET.y, KEY_OFFSET.z);
         scratch.position.applyQuaternion(quat);
         light.position.copy(scratch.position);
 

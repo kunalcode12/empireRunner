@@ -145,7 +145,7 @@ export function PlayerRig({ handleRef }: PlayerRigProps): React.ReactElement {
         const scaleY = poseRef.current.height / HEIGHT_STAND;
         body.scale.set(1, scaleY, 1);
         // Keep the feet planted while the body squashes.
-        body.position.y = (HEIGHT_STAND * HALF) * scaleY;
+        body.position.y = HEIGHT_STAND * HALF * scaleY;
       },
     };
 

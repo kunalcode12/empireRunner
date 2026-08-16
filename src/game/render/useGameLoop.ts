@@ -199,9 +199,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     const sim = engine.sim;
 
     // 1. Input — sampled once, immediately before the ticks it feeds.
-    const intent: Readonly<Intent> = paused
-      ? IDLE_INTENT
-      : (engine.input?.poll() ?? IDLE_INTENT);
+    const intent: Readonly<Intent> = paused ? IDLE_INTENT : (engine.input?.poll() ?? IDLE_INTENT);
 
     // 2. Fixed-timestep ticks. `advance` owns the accumulator and the spiral
     //    guard; this loop never sees wall-clock time again after this line.

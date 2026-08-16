@@ -20,7 +20,7 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P02** | Deterministic sim core | Fixed-timestep loop, accumulator, snapshot buffer, seeded PRNG, `SimState`, object pools, replay record/playback + hash | Same seed + log run twice → identical hash; 30/60/144Hz render rates → identical result; 0-byte heap delta over 10k ticks; tick < 2.0ms | **Complete** |
 | **P03** | Input layer | keyboard / touch / gamepad → normalised intent stream; input buffer, coyote time, stick hysteresis, two-finger roll gesture | Unit tests for buffer + coyote windows; a real device playtest of the two-finger roll (GAME_BIBLE §13 Q2 answered) | **Complete (code) · gate PARTIAL** |
 | **P04** | Player controller | 12-position face/lane state machine, jump/slide/lane/roll, asymmetric gravity, swept AABB collision, roll commit lock | Headless: all 6 verbs produce the exact durations in TUNING.md; `newLane === 2 - oldLane` across rolls; no tunnelling at `maxSpeed` | **Complete** |
-| **P05** | Render bridge & camera | r3f canvas, `dynamic(ssr:false)` mount, four-face prism geometry, runner mesh, snapshot interpolation, camera rig, r3f-perf, leva | Game boots and runs at 60fps; `< 100` draw calls desktop, `< 50` mobile; roll reads correctly and the reduced-motion path works | Not started |
+| **P05** | Render bridge & camera | r3f canvas, `dynamic(ssr:false)` mount, four-face prism geometry, runner mesh, snapshot interpolation, camera rig, r3f-perf, leva | Game boots and runs at 60fps; `< 100` draw calls desktop, `< 50` mobile; roll reads correctly and the reduced-motion path works | **Complete (code) · gate PARTIAL** — draw calls 15/10 measured, both budgets met; **fps unverified on real hardware**, reduced-motion and leva deferred |
 | **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | **Complete (not wired live)** |
 | **P07** | Entity catalogue | All 12 obstacles, 4 hazards, 7 pickups; instanced + pooled rendering; collision resolution; near-miss detection | Every entity in GAME_BIBLE §7 spawns, renders, and is defeated by exactly its listed verbs; near-miss fires at 0.45u surface-to-surface | Not started |
 | **P08** | Flow & Overdrive | Flow meter, all gain/decay sources, multiplier, flow→speed coupling, Overdrive mode + palette inversion + shatter | Flow math matches TUNING.md §9.1 in headless tests; Overdrive lasts exactly 6.0s, exits at 25 Flow; crash zeroes Flow | **Complete (sim only — gains cannot fire, nothing spawns)** |
@@ -46,6 +46,121 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-17 — P05 · Render bridge & camera — **Complete (code) · gate PARTIAL**
+
+**Verify gate**
+
+```
+npm run typecheck && npm run test && npm run build
+
+> tsc --noEmit         (clean)
+> eslint .             (clean, 0 errors 0 warnings — run alongside)
+> vitest run           Test Files 29 passed | Tests 659 passed (was 602)
+                       Duration 86.61s
+> next build           ✓ / · /_not-found · /play  all prerendered as static
+```
+
+**Measured — 60s of running play, `tests/e2e/perf.spec.ts`**
+
+```
+                        desktop-chromium      mobile-chromium (Pixel 7)
+  frames rendered            1,303                  3,726
+  fps  min                    17.3                   50.0     ⚠ software raster
+  fps  avg                    21.0                   60.1     ⚠ software raster
+  draw calls peak               15  (budget <100)      10  (budget <50)   ✅
+  triangles peak            45,536                 33,008
+  JS heap growth              0 KB                   0 KB     over 60s     ✅
+```
+
+⚠️ **The FPS figures are worthless and must not be quoted.** Headless Chromium
+falls back to SwiftShader, a software rasteriser. Draw calls, triangles and heap
+growth are exact and environment-independent; frame rate is not. **The "runs at
+60fps" half of the P05 gate is unverified** and needs someone to open `/play` on
+real hardware. That is why the phase is marked PARTIAL, not Complete.
+
+Zero heap growth over 60 seconds is the number I would look at hardest, and it is
+clean — the per-frame path allocates nothing.
+
+**Draw calls: 15, and the 5 I initially missed**
+
+```
+  colour pass   4 tunnel faces + 4 obstacle buckets + 1 pickups + 1 player = 10
+  shadow pass   4 obstacle buckets + 1 player                              =  5
+```
+
+I counted 10 and measured 15. A shadow map is a **second render of every caster**,
+so `castShadow` costs two draw calls, not one. Corrected in
+`EXPECTED_DRAW_CALLS` rather than left as a wrong constant. Mobile shows 10
+because it resolves to LOW, which turns shadows off entirely — the tier system
+working, visible in the numbers.
+
+**Shipped** — `src/game/render/`:
+
+| File | What it does |
+|---|---|
+| `GameCanvas.tsx` | Canvas, dpr `[1, min(dpr, 2)]`, explicit sRGB, `frameloop="always"`, Suspense → real loading screen |
+| `Scene.tsx` | In-canvas root. Renders exactly once; everything after is imperative |
+| `useGameLoop.ts` | poll input → accumulator → N ticks → interpolate → write transforms → drain events |
+| `interpolate.ts` | The only place both snapshots are read. `lerp`, shortest-path `lerpAngle`, frame-rate-independent `damp` |
+| `Tunnel.tsx` | 4 instanced faces × 24 segments, z-wrap recycling, one parent group for the roll |
+| `EntityRenderer.tsx` | 4 obstacle buckets + 1 pickup mesh, all instanced |
+| `PlayerRig.tsx` | Grey-box capsule behind an `animationState` prop |
+| `CameraRig.tsx` | Follow spring, speed→FOV, roll lean-and-settle, damped look-ahead |
+| `LightingRig.tsx` | One directional with a 22u shadow frustum + hemisphere fill |
+| `events.ts` | Cursor-based ring drain with dropped-event accounting |
+| `perf/quality.ts` · `perf/PerfMonitor.tsx` | LOW/MED/HIGH + `?quality=` override; r3f-perf, lazily imported so it never enters the prod bundle |
+| `devSeed.ts` | **Dev-only.** Writes real P06 chunks into entity columns once at mount |
+| `palette.ts` | Grey-box colours — the real Kiln palette, not placeholder neon |
+
+Also: `src/app/play/page.tsx` (the dynamic mount — the route folder had no page),
+`src/ui/screens/LoadingScreen.tsx`, and a `render` section plus nine camera keys
+in `tuning.ts`.
+
+**Decisions taken with approval**
+
+- **FOV 62 → 82** (`cameraSpeedFovBoost` +8 → +20). Outside TUNING.md's original
+  0–15 range, so the range was widened to 0–20 rather than the value silently
+  exceeding its own bound. At a flat-shaded art direction with no motion blur or
+  particles, FOV is very nearly the only cue carrying speed. The documented
+  nausea risk stands and needs the P15 reduced-motion switch.
+- **A dev-only world seeder.** Without it the tunnel is empty, `EntityRenderer`
+  is unevaluable by eye and the draw-call figure would be the empty-scene number.
+  It uses the real generator and real authored chunks, runs once before the first
+  tick, and is a separate module — the per-frame path still never writes sim state.
+
+**Three things worth recording**
+
+- **`useMemo` was the wrong home for the engine.** Constructing a `Sim` is a side
+  effect and React 19 double-invokes render in strict mode, so it could build two
+  sims and discard one mid-run. The React Compiler's immutability rule caught it.
+  Now a ref populated in an effect.
+- **No new dependencies.** ARCHITECTURE §4 lists `maath` as a P05 candidate;
+  the damping it would have provided is six lines, so it was hand-rolled.
+- **Camera rates are 1/s, not lerp weights.** A per-frame `lerp` converges faster
+  at higher frame rates, which would make the camera stiffer on better hardware.
+
+**Deliberately NOT done**
+
+- **No textures, no models, no post-processing.** Flat-colour primitives only.
+- **`reduced-motion` is not wired.** The P05 gate names it; the FOV pump and the
+  roll lean are exactly what it needs to disable. Deferred to P15 with the rest
+  of the a11y pass — flagged because the gate mentions it.
+- **leva is not mounted.** Installed and listed for P05, but a tuning panel bound
+  to `tuning.ts` with per-key range clamps is its own piece of work and nothing
+  yet needs live tweaking.
+- **The generator is still not wired into the live tick.** The seeded entities sit
+  at fixed z while the tunnel scrolls past, so they drift out of alignment with
+  the treadmill over time. Fine for instancing and draw calls; useless as
+  gameplay. P07.
+- **Collision is invisible.** Nothing renders a hitbox, and the placeholder
+  `classifyContact` means the seeded entities do not interact with the player.
+
+**What P07 needs:** wire the generator into step 4, replace `classifyContact` and
+the 0.5u placeholder collider, add geometry buckets for the real entity shapes
+(one draw call each, counted deliberately), and delete `devSeed.ts`.
+
+---
 
 ### 2026-08-16 — Cross-phase bug audit — **Complete**
 

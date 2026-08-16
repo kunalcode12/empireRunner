@@ -147,12 +147,7 @@ export function CameraRig({ handleRef }: CameraRigProps): null {
         scratch.followZ = damp(scratch.followZ, 0, FOLLOW_DEPTH, dt);
 
         // ── 4. Look-ahead ───────────────────────────────────────────────────
-        scratch.lookAhead = damp(
-          scratch.lookAhead,
-          laneBias * LOOK_AHEAD,
-          LOOK_AHEAD_DAMPING,
-          dt,
-        );
+        scratch.lookAhead = damp(scratch.lookAhead, laneBias * LOOK_AHEAD, LOOK_AHEAD_DAMPING, dt);
 
         // ── 3. Roll lean ────────────────────────────────────────────────────
         // Angular velocity of the WORLD roll drives the lean. During a roll it

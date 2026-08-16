@@ -21,13 +21,10 @@
 import dynamic from "next/dynamic";
 import { LoadingScreen } from "@/ui/screens/LoadingScreen";
 
-const GameCanvas = dynamic(
-  () => import("@/game/render/GameCanvas").then((mod) => mod.GameCanvas),
-  {
-    ssr: false,
-    loading: () => <LoadingScreen detail="Loading renderer" />,
-  },
-);
+const GameCanvas = dynamic(() => import("@/game/render/GameCanvas").then((mod) => mod.GameCanvas), {
+  ssr: false,
+  loading: () => <LoadingScreen detail="Loading renderer" />,
+});
 
 export default function PlayPage(): React.ReactElement {
   return (
