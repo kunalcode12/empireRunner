@@ -24,9 +24,9 @@ export const TIER_4: readonly Chunk[] = [
     // Wall on the floor forces the roll; a gate on the destination face has to
     // be cleared almost immediately after landing on it. The combo.
     entities: [
-      at(EntityType.FullFaceWall, FLOOR, 0, 8),
-      at(EntityType.HighGate, RIGHT_WALL, 0, 19),
-      ...bitLine(RIGHT_WALL, 1, 10, 16, 4),
+      at(EntityType.FullFaceWall, FLOOR, 0, 12),
+      at(EntityType.HighGate, RIGHT_WALL, 0, 21),
+      ...bitLine(RIGHT_WALL, 1, 14, 19, 3),
     ],
     exit: seam(allExceptFace(FLOOR), true),
     weight: 3,
@@ -38,9 +38,9 @@ export const TIER_4: readonly Chunk[] = [
     archetype: Archetype.RollThenJump,
     requiredVerbs: VerbFlag.Roll | VerbFlag.Slide,
     entities: [
-      at(EntityType.FullFaceWall, FLOOR, 0, 8),
-      at(EntityType.LowBar, LEFT_WALL, 0, 19),
-      ...bitLine(LEFT_WALL, 1, 10, 16, 4),
+      at(EntityType.FullFaceWall, FLOOR, 0, 12),
+      at(EntityType.LowBar, LEFT_WALL, 0, 21),
+      ...bitLine(LEFT_WALL, 1, 14, 19, 3),
     ],
     exit: seam(allExceptFace(FLOOR), true),
     weight: 2,
@@ -54,10 +54,7 @@ export const TIER_4: readonly Chunk[] = [
     // The full 12-cell puzzle: lane 1 is blocked on EVERY face at the same z.
     // Rolling does not help; only a lane change does. The inverse lesson to the
     // Full-Face Wall, and the reason both exist.
-    entities: [
-      at(EntityType.ShearRing, FLOOR, 1, 14),
-      ...bitLine(FLOOR, 0, 16, 22, 3),
-    ],
+    entities: [at(EntityType.ShearRing, FLOOR, 1, 14), ...bitLine(FLOOR, 0, 16, 22, 3)],
     weight: 2,
   }),
 
@@ -84,9 +81,9 @@ export const TIER_4: readonly Chunk[] = [
     archetype: Archetype.MultiFaceWeave,
     requiredVerbs: VerbFlag.Lane | VerbFlag.Roll,
     entities: [
-      at(EntityType.PillarPair, FLOOR, 0, 6),
-      at(EntityType.PillarPair, RIGHT_WALL, 1, 13),
-      at(EntityType.Block, CEILING, 1, 19),
+      at(EntityType.PillarPair, FLOOR, 0, 11),
+      at(EntityType.PillarPair, RIGHT_WALL, 1, 17),
+      at(EntityType.Block, CEILING, 1, 22),
       ...bitLine(LEFT_WALL, 1, 8, 20, 5),
     ],
   }),
@@ -130,7 +127,7 @@ export const TIER_4: readonly Chunk[] = [
     requiredVerbs: VerbFlag.Roll | VerbFlag.Lane,
     // Both faces are viable but they diverge early, so the choice is real.
     entities: [
-      at(EntityType.PillarPair, FLOOR, 1, 7),
+      at(EntityType.PillarPair, FLOOR, 1, 12),
       at(EntityType.Block, CEILING, 1, 15),
       at(EntityType.Shard, CEILING, 0, 20),
       ...bitLine(FLOOR, 0, 12, 22, 4),

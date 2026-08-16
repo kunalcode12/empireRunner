@@ -314,9 +314,7 @@ function selectChunk(state: LevelState, rng: RngState, tier: number): number {
 /** Writes a chunk into the ring, recycling the oldest slot when full. */
 function place(state: LevelState, chunkIndex: number, chunk: Chunk): PlacedChunk {
   const slotIndex =
-    state.count < WINDOW_CHUNKS
-      ? (state.head + state.count) % WINDOW_CHUNKS
-      : state.head;
+    state.count < WINDOW_CHUNKS ? (state.head + state.count) % WINDOW_CHUNKS : state.head;
 
   const slot = state.window[slotIndex];
   if (slot === undefined) {
@@ -383,7 +381,8 @@ export function generateNext(state: LevelState, rng: RngState, flow: number): Pl
 
   const tier = difficultyFor(state.nextDistance, flow);
   const index = selectChunk(state, rng, tier);
-  const chunk = index === TRANSITION_INDEX ? TRANSITION_CHUNK : (ALL_CHUNKS[index] ?? TRANSITION_CHUNK);
+  const chunk =
+    index === TRANSITION_INDEX ? TRANSITION_CHUNK : (ALL_CHUNKS[index] ?? TRANSITION_CHUNK);
   return place(state, index, chunk);
 }
 

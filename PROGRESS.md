@@ -21,7 +21,7 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P03** | Input layer | keyboard / touch / gamepad → normalised intent stream; input buffer, coyote time, stick hysteresis, two-finger roll gesture | Unit tests for buffer + coyote windows; a real device playtest of the two-finger roll (GAME_BIBLE §13 Q2 answered) | **Complete (code) · gate PARTIAL** |
 | **P04** | Player controller | 12-position face/lane state machine, jump/slide/lane/roll, asymmetric gravity, swept AABB collision, roll commit lock | Headless: all 6 verbs produce the exact durations in TUNING.md; `newLane === 2 - oldLane` across rolls; no tunnelling at `maxSpeed` | **Complete** |
 | **P05** | Render bridge & camera | r3f canvas, `dynamic(ssr:false)` mount, four-face prism geometry, runner mesh, snapshot interpolation, camera rig, r3f-perf, leva | Game boots and runs at 60fps; `< 100` draw calls desktop, `< 50` mobile; roll reads correctly and the reduced-motion path works | Not started |
-| **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | Not started |
+| **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | **Complete (not wired live)** |
 | **P07** | Entity catalogue | All 12 obstacles, 4 hazards, 7 pickups; instanced + pooled rendering; collision resolution; near-miss detection | Every entity in GAME_BIBLE §7 spawns, renders, and is defeated by exactly its listed verbs; near-miss fires at 0.45u surface-to-surface | Not started |
 | **P08** | Flow & Overdrive | Flow meter, all gain/decay sources, multiplier, flow→speed coupling, Overdrive mode + palette inversion + shatter | Flow math matches TUNING.md §9.1 in headless tests; Overdrive lasts exactly 6.0s, exits at 25 Flow; crash zeroes Flow | Not started |
 | **P09** | Fracture & cosmetic physics | Death freeze, correct-verb solver, 1.2s slow-mo window, resume; Rapier v2 debris and ragdolls | Solver picks the single clearing verb from a 0.40s lookback; arms only on single-answer deaths; **Rapier never writes to sim** (boundary test) | Not started |
@@ -46,6 +46,145 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-16 — P06 · Level generator — **Complete (not wired live)**
+
+**Verify gate — all green**
+
+```
+npm run typecheck && npm run test
+
+> tsc --noEmit         (clean)
+> eslint .             (clean, 0 errors 0 warnings — run alongside)
+> vitest run           Test Files 20 passed | Tests 472 passed (was 394)
+                       Duration 22.01s
+```
+
+**Shipped — `src/game/sim/level/`**
+
+- `chunk.ts` — chunk and seam types, 12-bit cell masks, verb and archetype enums.
+- `entities.ts` — the entity catalogue with a **blocking model keyed on the player's three
+  vertical states** rather than on world-space AABBs, because per-entity collider extents are
+  P07's job and a solver built on `collision.ts`'s placeholder 0.5u cube would prove chunks
+  safe against geometry that is not the shipping geometry.
+- `chunks/` — **32 hand-authored chunks** across five tier files. ≥5 per tier, all ten
+  required archetypes present, every one asserted by test.
+- `generator.ts` — rolling window, banded grammar, weighted selection, recency penalty, seam
+  validation, forced breathers, theme transitions. Fully pooled.
+- `validator.ts` — BFS solver over `(tick, face, lane, vertical, vertTimer, rollLock)`,
+  ~990k states worst case, with a reusable `Uint8Array` visited set.
+
+**A doc bug that would have poisoned the whole solver**
+
+GAME_BIBLE §7.1 listed the **Low Bar as occupying 0.0–1.05u** (a floor kerb) and the **High
+Gate as 1.4u–top** (a ceiling lintel) — while its own "defeated by" column said SLIDE and JUMP
+respectively. Those are inverted: you cannot slide under something on the floor, and you cannot
+jump over something that reaches the ceiling. TUNING §5 compounded it by calling both
+"underside height".
+
+The gate's own note — *"clearance 1.4u vs jump apex 1.75u = 0.35u margin"* — only works if
+1.4u is its **top**. Corrected in both docs before writing a line of solver.
+
+**The solver found 7 chunks I authored that are impossible**
+
+This is the finding of the phase. At maxSpeed one tick is 0.567u:
+
+| verb | ticks | distance |
+|---|---|---|
+| lane change | 8 | 4.5u |
+| roll | 18 | **10.2u** |
+| slide | 33 | 18.7u |
+| jump | 36 | **20.4u** |
+| **whole chunk** | 43 | **24u** |
+
+Two consequences I had not accounted for while authoring:
+
+1. **A Full-Face Wall must sit at z ≥ ~11u.** A roll takes 10.2u to complete and the player is
+   still on the old face throughout, so a wall at z=8 kills them mid-roll. Four chunks had
+   walls too early.
+2. **No 24u chunk can demand two vertical verbs.** Jump (36t) + slide (33t) = 69 ticks against
+   a 43-tick chunk. `t5-roll-jump-slide` asked for roll + jump + slide and was never possible.
+   Reframed as `t5-braced-roll-jump`. `t5-double-roll` likewise: two rolls are 20.4u plus
+   cooldown, so it became `t5-wrong-way-wall` — one roll where the *direction* is the decision,
+   which is a better chunk than the one I set out to write.
+
+Three more failed on lane-shuffle timing: two lane changes are 16 ticks, so a pillar pair at
+z=7 is unreachable from the outer lane. All seven fixed; all 32 now pass from **all 12 entry
+cells**.
+
+**Slack table** — ticks the player can be frozen on entry and still survive:
+
+```
+tier 1   17-43     generous, as the teaching band should be
+tier 2    6-43
+tier 3    6-43
+tier 4    3-43     t4-roll-then-jump / -slide / -multiface-weave sit at 3
+tier 5    3-43     t5-braced-roll-jump and t5-gauntlet-terminal sit at 3
+```
+
+Nothing is below `minSolverSlackTicks` (3), so nothing is flagged TIGHT — but the tier-4/5
+floor sitting exactly *on* the threshold is worth knowing. Those six are the first place to
+look if playtesters report the late game feeling unfair.
+
+**Fuzz — 10,000 seeds x 250 chunks = 2,500,000 chunk selections**
+
+```
+  distance      mean tier  distribution (tier 1..5 share)
+      0-  500m     1.00     1111111111111111111111111111111111111111
+    500- 1000m     2.00     2222222222222222222222222222222222222222
+   1000- 1500m     2.00     2222222222222222222222222222222222222222
+   1500- 2000m     3.00     3333333333333333333333333333333333333333
+   2000- 2500m     3.00     3333333333333333333333333333333333333333
+   2500- 3000m     3.00     3333333333333333333333333333333333333333
+   3000- 3500m     3.76     3333333333444444444444444444444444444444
+   3500- 4000m     3.76     3333333333444444444444444444444444444444
+   4000- 4500m     3.76     3333333333444444444444444444444444444444
+   4500- 5000m     3.75     3333333333444444444444444444444444444444
+   5000- 5500m     4.53     3333333335555555555555555555555555555555
+   5500- 6000m     4.50     3333333333555555555555555555555555555555
+
+  chunks generated : 2,500,000
+  transitions      :   150,000
+  seam violations  :         0
+  breather breaches:         0
+```
+
+The tier-3 floor visible from 3,000m on is the **breather rule working** — it forces a
+non-hard chunk after three consecutive hard ones, and tier 3 is where those come from.
+
+**Deliberately NOT done**
+
+- **The generator is not wired into the live tick.** `src/game/sim/generator.ts` is still the
+  P02 no-op stub. Connecting it would spawn entities that `collision.ts`'s placeholder
+  classifier mishandles — it currently splits fatal/stumble on odd-vs-even kind id — and
+  per-entity collider extents do not exist. Both are P07. **The game still generates no
+  track.**
+- The solver does not model the fast-drop, so it is *stricter* than the real controller. That
+  is the safe direction: a chunk it passes is survivable in the real game, and no chunk
+  depends on an undocumented technique.
+- `minReactionTime` is not separately asserted. The solver subsumes it — a chunk that violates
+  reaction time has zero slack and fails outright.
+
+**Known issues**
+
+- Six tier-4/5 chunks sit exactly at the slack threshold of 3 ticks (50ms).
+- The layering lint rule needed a **third** fix. v1 assumed sim files sat at the root, v2
+  allowlisted sibling module names by hand and broke on `../chunk`. It is now a **denylist**
+  of the six sibling layers, which cannot go stale when a module is added. Verified against a
+  probe that escapes to `render/` and `ui/`.
+- `no-magic-numbers` is now exempt for `src/game/sim/level/chunks/**`, on the same grounds as
+  `config/`: those files are pure data, every number *is* the content, and hoisting each z
+  offset to a named constant would make them unreadable to whoever authors chunk 33.
+
+**What P07 needs**
+
+- Wire `stepGenerator` to `fillWindow`, and replace `classifyContact`'s odd/even placeholder
+  with the real `ENTITY_DEFS` table.
+- Add per-entity collider extents, then add the cross-check test asserting the solver's
+  logical blocking model and the real AABBs agree. **Until that test exists, the two models
+  can drift and nothing will notice.**
+
+---
 
 ### 2026-08-16 — P04b · Hardening pass — **Complete**
 

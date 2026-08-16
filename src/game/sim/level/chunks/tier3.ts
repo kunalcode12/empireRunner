@@ -25,10 +25,7 @@ export const TIER_3: readonly Chunk[] = [
     requiredVerbs: VerbFlag.Roll,
     // THE signature chunk. Full-Face Wall across the floor near the trailing
     // edge; the only survivable cells at the exit seam are on another face.
-    entities: [
-      at(EntityType.FullFaceWall, FLOOR, 0, 17),
-      ...bitLine(RIGHT_WALL, 1, 12, 22, 5),
-    ],
+    entities: [at(EntityType.FullFaceWall, FLOOR, 0, 17), ...bitLine(RIGHT_WALL, 1, 12, 22, 5)],
     exit: seam(allExceptFace(FLOOR), true),
     weight: 3,
   }),
@@ -40,10 +37,7 @@ export const TIER_3: readonly Chunk[] = [
     requiredVerbs: VerbFlag.Roll,
     // Same idea entered from a wall face, so the answer is not always "roll
     // right off the floor".
-    entities: [
-      at(EntityType.FullFaceWall, RIGHT_WALL, 0, 16),
-      ...bitLine(FLOOR, 1, 11, 21, 5),
-    ],
+    entities: [at(EntityType.FullFaceWall, RIGHT_WALL, 0, 16), ...bitLine(FLOOR, 1, 11, 21, 5)],
     entry: seam(ALL_CELLS, true),
     exit: seam(allExceptFace(RIGHT_WALL), true),
     weight: 2,
@@ -100,7 +94,7 @@ export const TIER_3: readonly Chunk[] = [
     requiredVerbs: VerbFlag.Lane | VerbFlag.Jump,
     // Left: jump a gate for a Shard. Right: walk around it for nothing.
     entities: [
-      at(EntityType.PillarPair, FLOOR, 1, 9),
+      at(EntityType.PillarPair, FLOOR, 1, 13),
       at(EntityType.HighGate, LEFT_WALL, 0, 16),
       at(EntityType.Shard, LEFT_WALL, 1, 19),
       ...bitLine(FLOOR, 0, 12, 22, 4),

@@ -22,33 +22,43 @@ const LEFT_WALL = 3;
 
 export const TIER_5: readonly Chunk[] = [
   chunk({
-    id: "t5-double-roll",
+    id: "t5-wrong-way-wall",
     difficulty: 5,
     archetype: Archetype.ForcedRoll,
     requiredVerbs: VerbFlag.Roll,
-    // Two walls on adjacent faces. One roll is not enough; the player has to
-    // commit twice, through the cooldown.
+    // Walls on the floor AND the right wall at the same z. A roll is forced and
+    // one of the two directions is fatal.
+    //
+    // This started life as a double-roll and the solver proved it impossible:
+    // two rolls cost 20.4u plus cooldown and a chunk is only 24u. Reframing it
+    // as one roll with a wrong answer is both survivable and a better chunk —
+    // the tension is the decision, not the repetition.
     entities: [
-      at(EntityType.FullFaceWall, FLOOR, 0, 7),
-      at(EntityType.FullFaceWall, RIGHT_WALL, 0, 20),
-      ...bitLine(CEILING, 1, 10, 18, 4),
+      at(EntityType.FullFaceWall, FLOOR, 0, 13),
+      at(EntityType.FullFaceWall, RIGHT_WALL, 0, 13),
+      ...bitLine(LEFT_WALL, 1, 16, 22, 3),
     ],
     exit: seam(allExceptFace(FLOOR) & allExceptFace(RIGHT_WALL), true),
     weight: 2,
   }),
 
   chunk({
-    id: "t5-roll-jump-slide",
+    id: "t5-braced-roll-jump",
     difficulty: 5,
     archetype: Archetype.RollThenJump,
-    requiredVerbs: VerbFlag.Roll | VerbFlag.Jump | VerbFlag.Slide,
-    // All three answers, in order, in 24u. The hardest legitimate ask in the
-    // pool — and the one to watch in the slack table.
+    requiredVerbs: VerbFlag.Roll | VerbFlag.Jump,
+    // Roll, but a Corner Brace makes the right-hand roll wrong; then clear a
+    // gate on the destination face almost immediately after landing on it.
+    //
+    // Originally asked for roll + jump + slide. The solver proved that
+    // impossible: at maxSpeed a jump is 36 ticks and a slide 33, and the whole
+    // chunk is 43. **No 24u chunk can demand two vertical verbs.** That is a
+    // property of the chunk length, not of this chunk.
     entities: [
-      at(EntityType.FullFaceWall, FLOOR, 0, 6),
-      at(EntityType.HighGate, LEFT_WALL, 0, 15),
-      at(EntityType.LowBar, LEFT_WALL, 0, 22),
-      ...bitLine(LEFT_WALL, 1, 17, 20, 2),
+      at(EntityType.FullFaceWall, FLOOR, 0, 12),
+      at(EntityType.CornerBrace, FLOOR, 2, 12),
+      at(EntityType.HighGate, LEFT_WALL, 0, 21),
+      ...bitLine(LEFT_WALL, 1, 15, 19, 3),
     ],
     exit: seam(allExceptFace(FLOOR), true),
   }),

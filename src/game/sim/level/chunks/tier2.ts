@@ -91,10 +91,7 @@ export const TIER_2: readonly Chunk[] = [
     requiredVerbs: 0,
     // Empty of threat, full of reward. This is the beat that makes the next
     // hard chunk land.
-    entities: [
-      ...bitLine(FLOOR, 1, 2, 22, 9),
-      at(EntityType.OverdriveCell, FLOOR, 1, 12),
-    ],
+    entities: [...bitLine(FLOOR, 1, 2, 22, 9), at(EntityType.OverdriveCell, FLOOR, 1, 12)],
     weight: 2,
   }),
 
