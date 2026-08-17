@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
-import { EntityType } from "@/game/sim/level/entities";
-import { createState, type SimState } from "@/game/sim/state";
+import { EntityType, entityCentreX } from "@/game/sim/level/entities";
+import { F, type SimState } from "@/game/sim/state";
 import { Bucket, BUCKET_COUNT, bucketFor, composeEntityMatrix } from "@/game/render/EntityRenderer";
-import { seedWorldFromGenerator } from "@/game/render/devSeed";
+import { createSim } from "@/game/sim/sim";
+import { liveCount } from "@/game/sim/generator";
 import {
   EXPECTED_DRAW_CALLS,
   EXPECTED_DRAW_CALLS_COLOUR,
@@ -36,7 +37,9 @@ const UNIT_SHAPE = { width: 1, height: 1, depth: 1, centreY: 0 };
 
 function positionOf(face: number, lane: number, z: number, y = 0): THREE.Vector3 {
   const matrix = new THREE.Matrix4();
-  composeEntityMatrix(matrix, scratch(), face, lane, z, y, UNIT_SHAPE);
+  // The renderer takes a resolved x, exactly as it reads it from EntityColumns.
+  const x = entityCentreX(lane, EntityType.Block);
+  composeEntityMatrix(matrix, scratch(), face, x, z, y, UNIT_SHAPE);
   const out = new THREE.Vector3();
   out.setFromMatrixPosition(matrix);
   return out;
@@ -128,14 +131,14 @@ describe("instance placement", () => {
   it("lifts an entity by its centreY", () => {
     const matrix = new THREE.Matrix4();
     const LIFT = 1.4;
-    composeEntityMatrix(matrix, scratch(), 0, 1, 0, 0, { ...UNIT_SHAPE, centreY: LIFT });
+    composeEntityMatrix(matrix, scratch(), 0, 0, 0, 0, { ...UNIT_SHAPE, centreY: LIFT });
     const p = new THREE.Vector3().setFromMatrixPosition(matrix);
     expect(p.y).toBeCloseTo(-PRISM_SIZE * HALF + LIFT, 9);
   });
 
   it("writes the shape's dimensions into the matrix scale", () => {
     const matrix = new THREE.Matrix4();
-    composeEntityMatrix(matrix, scratch(), 0, 1, 0, 0, {
+    composeEntityMatrix(matrix, scratch(), 0, 0, 0, 0, {
       width: 2,
       height: 3,
       depth: 4,
@@ -148,62 +151,53 @@ describe("instance placement", () => {
   });
 });
 
-describe("the dev seeder produces real authored track", () => {
-  it("fills entity columns from the P06 generator", () => {
-    const state: SimState = createState();
-    seedWorldFromGenerator(state, { chunks: 10, seed: 7 });
+describe("the live generator populates what the renderer draws", () => {
+  /** Ticks a real sim until the tunnel has geometry in it. */
+  function populated(seed: number, seconds = 20): SimState {
+    const sim = createSim(seed);
+    const idle = { lateral: 0, roll: 0, jump: false, slide: false, overdrive: false };
+    for (let i = 0; i < TUNING.sim.tickRate * seconds; i += 1) {
+      sim.getState().f[F.playerInvulnerableTimer] = 999;
+      sim.tick(idle);
+    }
+    return sim.getState();
+  }
 
-    expect(state.obstacles.count).toBeGreaterThan(0);
-    expect(state.pickups.count).toBeGreaterThan(0);
+  it("fills entity columns from real generated chunks", () => {
+    const state = populated(7);
+    expect(liveCount(state.obstacles)).toBeGreaterThan(0);
+    expect(liveCount(state.pickups)).toBeGreaterThan(0);
   });
 
   it("only ever uses types from the real catalogue", () => {
-    const state = createState();
-    seedWorldFromGenerator(state, { chunks: 20, seed: 3 });
-
+    const state = populated(3);
     const known = new Set<number>(Object.values(EntityType));
     for (let i = 0; i < state.obstacles.count; i += 1) {
       expect(known.has(state.obstacles.kind[i] ?? -1)).toBe(true);
     }
   });
 
-  it("is deterministic for a seed", () => {
-    const a = createState();
-    const b = createState();
-    seedWorldFromGenerator(a, { chunks: 8, seed: 42 });
-    seedWorldFromGenerator(b, { chunks: 8, seed: 42 });
+  it("never overruns the instance buffers the renderer allocated", () => {
+    // The renderer sizes its instance buffers from the pool capacities. If the
+    // sim could ever exceed them, instances would be silently dropped.
+    const state = populated(1, 120);
+    expect(state.obstacles.count).toBeLessThanOrEqual(TUNING.render.maxInstancesPerGeometry);
+    expect(state.pickups.count).toBeLessThanOrEqual(TUNING.render.maxPickupInstances);
+  });
 
-    expect(b.obstacles.count).toBe(a.obstacles.count);
-    for (let i = 0; i < a.obstacles.count; i += 1) {
-      expect(b.obstacles.kind[i]).toBe(a.obstacles.kind[i]);
-      expect(b.obstacles.z[i]).toBe(a.obstacles.z[i]);
+  it("gives every live entity a lateral centre the renderer can use", () => {
+    // Collision reads EntityColumns.x; so does the renderer. A zero here would
+    // stack every multi-lane obstacle on the tunnel centreline.
+    const state = populated(11);
+    let checked = 0;
+    for (let i = 0; i < state.obstacles.count; i += 1) {
+      if (state.obstacles.active[i] !== 1) continue;
+      const lane = state.obstacles.lane[i] ?? 0;
+      const kind = state.obstacles.kind[i] ?? 0;
+      expect(state.obstacles.x[i]).toBeCloseTo(entityCentreX(lane, kind), 9);
+      checked += 1;
     }
-  });
-
-  it("never overruns the entity pools", () => {
-    const state = createState();
-    // Far more chunks than the pools can hold; it must stop, not overflow.
-    seedWorldFromGenerator(state, { chunks: 500, seed: 1 });
-    expect(state.obstacles.count).toBeLessThanOrEqual(TUNING.pools.maxObstacles);
-    expect(state.pickups.count).toBeLessThanOrEqual(TUNING.pools.maxPickups);
-  });
-
-  it("touches only the entity columns, never the run state", () => {
-    // It is a dev harness, not a gameplay system. If it ever moved the player or
-    // advanced the RNG it would silently change what the sim does.
-    const state = createState();
-    const before = {
-      tick: state.tick,
-      lane: state.player.lane,
-      face: state.player.face,
-      rng: state.rngGenerator,
-    };
-    seedWorldFromGenerator(state, { chunks: 10, seed: 5 });
-
-    expect(state.tick).toBe(before.tick);
-    expect(state.player.lane).toBe(before.lane);
-    expect(state.player.face).toBe(before.face);
-    expect(state.rngGenerator).toBe(before.rng);
+    expect(checked).toBeGreaterThan(0);
   });
 });
 
@@ -212,9 +206,10 @@ describe("the draw-call budget", () => {
     // 10 colour + 5 shadow casters = 15. The shadow pass is a second render of
     // every caster and is the half that is easy to forget: the first count here
     // said 10 and the measured figure came back 15.
-    expect(EXPECTED_DRAW_CALLS_COLOUR).toBe(10);
+    // 10 scene + 1 particle system = 11 colour, plus 5 shadow casters.
+    expect(EXPECTED_DRAW_CALLS_COLOUR).toBe(11);
     expect(EXPECTED_SHADOW_CASTERS).toBe(5);
-    expect(EXPECTED_DRAW_CALLS).toBe(15);
+    expect(EXPECTED_DRAW_CALLS).toBe(16);
     expect(EXPECTED_DRAW_CALLS).toBeLessThan(TUNING.budgets.drawCallsDesktop);
     expect(EXPECTED_DRAW_CALLS).toBeLessThan(TUNING.budgets.drawCallsMobile);
   });
@@ -222,14 +217,8 @@ describe("the draw-call budget", () => {
   it("stays constant no matter how many entities are live", () => {
     // The property instancing buys. A per-entity mesh would make this scale with
     // the band-5 worst case, which is roughly 300 calls against a budget of 100.
-    const sparse = createState();
-    seedWorldFromGenerator(sparse, { chunks: 1, seed: 1 });
-
-    const dense = createState();
-    seedWorldFromGenerator(dense, { chunks: 60, seed: 1 });
-
-    expect(dense.obstacles.count).toBeGreaterThan(sparse.obstacles.count);
     // Draw calls are a property of the bucket count, not the entity count.
-    expect(EXPECTED_DRAW_CALLS).toBe(15);
+    // Draw calls are a property of the bucket count, not the entity count.
+    expect(EXPECTED_DRAW_CALLS).toBe(16);
   });
 });

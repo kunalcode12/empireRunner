@@ -120,11 +120,6 @@ const BUCKET_SHAPES: readonly BucketShape[] = [
   },
 ];
 
-/** u — lateral centre of a lane, matching `sim/player/facing.ts`. */
-function laneCentreX(lane: number): number {
-  return (lane - (TUNING.geometry.laneCount - 1) * HALF) * LANE_WIDTH;
-}
-
 export interface EntityRendererHandle {
   /**
    * Rewrites every instance matrix from the given sim state.
@@ -158,14 +153,20 @@ export function composeEntityMatrix(
     axis: THREE.Vector3;
   },
   face: number,
-  lane: number,
+  x: number,
   z: number,
   y: number,
   shape: BucketShape,
 ): void {
-  // Position within the face's own frame: lane across, height up from the floor,
+  // Position within the face's own frame: `x` across, height up from the floor,
   // and the floor itself half a prism below the tunnel axis.
-  scratch.position.set(laneCentreX(lane), -PRISM_SIZE * HALF + shape.centreY + y, -z);
+  //
+  // `x` is READ from EntityColumns, not recomputed from the lane index. The sim
+  // resolves it once at spawn via `entityCentreX`, which accounts for laneSpan.
+  // Deriving it here from the lane alone would put every multi-lane wall a full
+  // lane away from where collision thinks it is — the renderer and the hitbox
+  // must come from one source or the game lies about where things are.
+  scratch.position.set(x, -PRISM_SIZE * HALF + shape.centreY + y, -z);
 
   // Then rotate the whole thing onto its face. Same convention as Tunnel.tsx:
   // face index times a quarter turn about the tunnel axis.
@@ -280,7 +281,7 @@ export function EntityRenderer({ handleRef }: EntityRendererProps): React.ReactE
           scratch.matrix,
           scratch,
           obstacles.face[i] ?? 0,
-          obstacles.lane[i] ?? 0,
+          obstacles.x[i] ?? 0,
           obstacles.z[i] ?? 0,
           obstacles.y[i] ?? 0,
           shape,
@@ -326,7 +327,7 @@ export function EntityRenderer({ handleRef }: EntityRendererProps): React.ReactE
           scratch.matrix,
           scratch,
           pickups.face[i] ?? 0,
-          pickups.lane[i] ?? 0,
+          pickups.x[i] ?? 0,
           pickups.z[i] ?? 0,
           pickups.y[i] ?? 0,
           coinShape,

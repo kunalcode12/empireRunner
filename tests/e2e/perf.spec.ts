@@ -24,10 +24,11 @@ import { expect, test } from "@playwright/test";
  * So the assertions below gate on the exact figures and merely *report* FPS.
  */
 
-const SIXTY_SECONDS_MS = 60_000;
+const SIXTY_SECONDS_MS = 180_000;
 const SAMPLE_INTERVAL_MS = 250;
 
 interface PerfSample {
+  particlePeak?: number;
   fps: number;
   minFps: number;
   avgFps: number;
@@ -47,11 +48,27 @@ declare global {
   }
 }
 
+/**
+ * 1st-percentile frame rate — the worst 1% of frames.
+ *
+ * More useful than `min` for judging smoothness: a single 300ms hitch at startup
+ * ruins the minimum forever, while p1 describes what the player actually feels
+ * during the bad moments. Both are reported.
+ */
+function p1(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.floor(sorted.length * 0.01);
+  return sorted[index] ?? sorted[0] ?? 0;
+}
+
 test.describe("render perf", () => {
-  // A 60-second measurement plus a build. Generous, and it runs once.
+  // A three-minute measurement plus a build. Generous, and it runs once.
   test.setTimeout(SIXTY_SECONDS_MS + 120_000);
 
-  test("60 seconds of play stays inside the draw-call budget", async ({ page }, testInfo) => {
+  test("three minutes of play stays inside the draw-call budget", async ({ page }, testInfo) => {
     const budget = testInfo.project.name.startsWith("mobile") ? 50 : 100;
 
     const consoleErrors: string[] = [];
@@ -83,6 +100,8 @@ test.describe("render perf", () => {
 
     let peakDrawCalls = 0;
     let peakTriangles = 0;
+    let peakParticles = 0;
+    const fpsSamples: number[] = [];
 
     const started = Date.now();
     while (Date.now() - started < SIXTY_SECONDS_MS) {
@@ -92,7 +111,9 @@ test.describe("render perf", () => {
         continue;
       }
       peakDrawCalls = Math.max(peakDrawCalls, sample.drawCalls);
+      fpsSamples.push(sample.fps);
       peakTriangles = Math.max(peakTriangles, sample.triangles);
+      peakParticles = Math.max(peakParticles, sample.particlePeak ?? 0);
     }
 
     const final = await page.evaluate(() => window.__axisPerf);
@@ -110,15 +131,17 @@ test.describe("render perf", () => {
     const report = [
       "",
       "=".repeat(72),
-      `AXIS P05 PERF — ${testInfo.project.name}, 60s`,
+      `AXIS FEEL PERF — ${testInfo.project.name}, 180s`,
       "=".repeat(72),
       `  frames rendered   ${final.frames}`,
       `  fps  min          ${final.minFps.toFixed(1)}   (software rasteriser — NOT representative)`,
       `  fps  avg          ${final.avgFps.toFixed(1)}   (as above)`,
       `  draw calls peak   ${peakDrawCalls}   budget < ${budget}`,
       `  triangles peak    ${peakTriangles.toLocaleString()}`,
+      `  fps  p1           ${p1(fpsSamples).toFixed(1)}   (as above)`,
+      `  particle peak     ${peakParticles}`,
       heapStart.supported
-        ? `  JS heap growth    ${heapGrowthKb} KB over 60s ` +
+        ? `  JS heap growth    ${heapGrowthKb} KB over 180s ` +
           `(${(heapStart.used / BYTES_PER_MB).toFixed(1)} MB -> ${(heapEnd.used / BYTES_PER_MB).toFixed(1)} MB)`
         : "  JS heap growth    unavailable (performance.memory is Chromium-only)",
       "=".repeat(72),

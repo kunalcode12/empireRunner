@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TUNING } from "@/game/config/tuning";
 import { createEventRing, eventPayloadAt, eventTypeAt, SimEvent } from "@/game/sim/events";
 import { createSim } from "@/game/sim/sim";
+import { driveEmpty } from "../helpers/drive";
 import { createState, F, RunStatus, type SimState } from "@/game/sim/state";
 import {
   addFlow,
@@ -26,10 +27,6 @@ const GRACE = TUNING.flow.flowDecayGrace;
 const NEAR_MISS_RADIUS = TUNING.flow.nearMissRadius;
 const FLOW_PER_NEAR_MISS = TUNING.flow.flowPerNearMiss;
 const SCALE_MIN = TUNING.flow.nearMissScaleMin;
-
-function idle() {
-  return { lateral: 0, roll: 0, jump: false, slide: false, overdrive: false };
-}
 
 describe("near-miss Flow scales with proximity", () => {
   it("pays the full award for a graze at zero gap", () => {
@@ -236,9 +233,7 @@ describe("frame-rate independence", () => {
 
     function run(): number {
       const sim = createSim(0xf10a);
-      for (let i = 0; i < TICKS; i += 1) {
-        sim.tick(idle());
-      }
+      driveEmpty(sim, TICKS);
       return sim.hash();
     }
 
@@ -351,8 +346,8 @@ describe("the Flow to speed coupling is live in the real sim", () => {
     for (let i = 0; i < TICKS; i += 1) {
       // Pin one sim's meter full each tick, mirroring a player earning it.
       withFlow.getState().f[F.flow] = FLOW_MAX;
-      withFlow.tick(idle());
-      without.tick(idle());
+      driveEmpty(withFlow, 1);
+      driveEmpty(without, 1);
     }
 
     const fast = withFlow.getState().f[F.worldSpeed] ?? 0;
@@ -367,8 +362,8 @@ describe("the Flow to speed coupling is live in the real sim", () => {
 
     for (let i = 0; i < 1800; i += 1) {
       withFlow.getState().f[F.flow] = FLOW_MAX;
-      withFlow.tick(idle());
-      without.tick(idle());
+      driveEmpty(withFlow, 1);
+      driveEmpty(without, 1);
     }
 
     expect(withFlow.getState().f[F.distance] ?? 0).toBeGreaterThan(
@@ -380,7 +375,7 @@ describe("the Flow to speed coupling is live in the real sim", () => {
     const sim = createSim(3);
     for (let i = 0; i < 60_000; i += 1) {
       sim.getState().f[F.flow] = FLOW_MAX;
-      sim.tick(idle());
+      driveEmpty(sim, 1);
       expect(sim.getState().f[F.worldSpeed] ?? 0).toBeLessThanOrEqual(TUNING.speed.maxSpeed);
     }
   });

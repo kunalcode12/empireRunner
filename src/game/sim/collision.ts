@@ -36,6 +36,7 @@ import { emit, SimEvent, type EventRing } from "./events";
 import {
   createAabb,
   obstacleAabb,
+  overlaps,
   penetrationX,
   penetrationY,
   penetrationZ,
@@ -43,6 +44,8 @@ import {
   separation,
   type Aabb,
 } from "./player/collider";
+import { entityCollider } from "../config/entities";
+import { blocksVertical, entityDef, EntityType, Vertical } from "./level/entities";
 import { applyFatal, applyStumble, CrashCause } from "./player";
 import { overdriveActive } from "./scoring/overdrive";
 import { F, type SimState } from "./state";
@@ -71,26 +74,42 @@ export const EntityFlag = {
 /**
  * Obstacle kind -> contact class.
  *
- * PLACEHOLDER. P07 replaces this with the real table in `config/entities.ts`,
- * keyed by the 12 obstacles and 4 hazards in GAME_BIBLE §7. Kept here rather
- * than guessed at in config so P07 has one obvious place to delete.
+ * Reads the real catalogue in `sim/level/entities.ts`. This replaced an odd/even
+ * placeholder at P07 — until then a kind's *parity* decided whether it killed
+ * you, which was harmless only because nothing spawned.
+ *
+ * Three classes, and the mapping is not arbitrary:
+ *
+ *   - `fatal: false` entities (Kicker, Corner Brace) are **Pass**. A Kicker is a
+ *     ramp and a Corner Brace restricts the roll; neither is a hit.
+ *   - Anything that blocks **every** vertical state is **Fatal**. There was no
+ *     vertical answer, so hitting it is not a mistake of degree.
+ *   - Anything that leaves a vertical state open is a **Stumble**. The player
+ *     had an out and missed it, which is a fumble rather than a death — this is
+ *     what makes the difference between "hard" and "broken" (TUNING §12b).
  */
 export function classifyContact(kind: number): number {
-  if (kind < 0) {
+  const def = entityDef(kind);
+  if (def.pickup || def.type === EntityType.None) {
     return ContactClass.Pass;
   }
-  // Until the catalogue exists, odd kinds stumble and even kinds kill. This is
-  // a stand-in that lets the swept tests exercise both paths, NOT a design.
-  return kind % 2 === 1 ? ContactClass.Stumble : ContactClass.Fatal;
+  if (!def.fatal) {
+    return ContactClass.Pass;
+  }
+
+  const blocksAll =
+    blocksVertical(kind, Vertical.Standing) &&
+    blocksVertical(kind, Vertical.Sliding) &&
+    blocksVertical(kind, Vertical.Airborne);
+
+  return blocksAll ? ContactClass.Fatal : ContactClass.Stumble;
 }
 
 /** Scratch boxes, reused every tick. Law (d): the tick allocates nothing. */
 const playerBox: Aabb = createAabb();
 const playerBoxEnd: Aabb = createAabb();
 const obstacleBox: Aabb = createAabb();
-
-/** Default obstacle half-extents until the P07 catalogue supplies real ones. */
-const DEFAULT_OBSTACLE_HALF = 0.5;
+const pickupBox: Aabb = createAabb();
 
 /**
  * Swept overlap test along relative motion.
@@ -209,6 +228,10 @@ function nudgeClear(state: SimState, a: Aabb, b: Aabb): void {
  * motion along -Z at `worldSpeed`.
  */
 export function stepCollision(state: SimState, dt: number, events: EventRing): void {
+  // Pickups first: collecting a Bit on the same tick a hit lands should still
+  // count. The alternative silently voids the last grab of every run.
+  stepPickups(state, events);
+
   const obstacles = state.obstacles;
   if (obstacles.count === 0) {
     return;
@@ -244,17 +267,21 @@ export function stepCollision(state: SimState, dt: number, events: EventRing): v
       continue;
     }
 
+    // Real extents from the catalogue. A Full-Face Wall and a Bit no longer
+    // share a hitbox, which they did throughout P02–P06.
+    const kind = obstacles.kind[i] ?? 0;
+    const collider = entityCollider(kind);
     obstacleAabb(
       obstacleBox,
       obstacles.x[i] ?? 0,
       obstacles.y[i] ?? 0,
       obstacles.z[i] ?? 0,
-      DEFAULT_OBSTACLE_HALF,
-      DEFAULT_OBSTACLE_HALF,
-      DEFAULT_OBSTACLE_HALF,
+      collider.halfWidth,
+      collider.halfHeight,
+      collider.halfDepth,
     );
 
-    const contact = classifyContact(obstacles.kind[i] ?? 0);
+    const contact = classifyContact(kind);
     if (contact === ContactClass.Pass) {
       recordNearMiss(state, obstacles, i, events);
       continue;
@@ -302,6 +329,70 @@ export function stepCollision(state: SimState, dt: number, events: EventRing): v
       applyFatal(state, events, CrashCause.Obstacle, i);
       return;
     }
+  }
+}
+
+/**
+ * Collects any pickup the player is overlapping.
+ *
+ * Discrete rather than swept, and deliberately so. A missed Bit is a
+ * disappointment; a missed *obstacle* is a death, which is why that path sweeps
+ * and this one does not. The generous collider extents in `config/entities.ts`
+ * do the work instead — a Bit's grab box is 0.45u against a 0.22u visual.
+ *
+ * During Overdrive the magnet goes global (GAME_BIBLE §4.3), so every pickup on
+ * the player's face is collected regardless of distance. That is implemented
+ * here rather than as an attraction force because the sim has no notion of
+ * pickup velocity, and a visual pull is the render layer's job.
+ */
+function stepPickups(state: SimState, events: EventRing): void {
+  const pickups = state.pickups;
+  if (pickups.count === 0) {
+    return;
+  }
+
+  const player = state.player;
+  const px = state.f[F.playerX] ?? 0;
+  const py = state.f[F.playerY] ?? 0;
+  const pz = state.f[F.playerZ] ?? 0;
+  const globalMagnet = overdriveActive(state);
+
+  playerAabb(playerBox, player.phase, px, py, pz);
+
+  for (let i = 0; i < pickups.count; i += 1) {
+    if (pickups.active[i] !== 1) {
+      continue;
+    }
+    if (pickups.face[i] !== player.face) {
+      continue;
+    }
+
+    const kind = pickups.kind[i] ?? 0;
+    const z = pickups.z[i] ?? 0;
+
+    if (!globalMagnet) {
+      const collider = entityCollider(kind);
+      obstacleAabb(
+        pickupBox,
+        pickups.x[i] ?? 0,
+        pickups.y[i] ?? 0,
+        z,
+        collider.halfWidth,
+        collider.halfHeight,
+        collider.halfDepth,
+      );
+      if (!overlaps(playerBox, pickupBox)) {
+        continue;
+      }
+    } else if (z > 0) {
+      // Global magnet still only takes what is at or behind the player plane,
+      // so Overdrive does not reach forward through the entire visible tunnel.
+      continue;
+    }
+
+    pickups.active[i] = 0;
+    pickups.flags[i] = 0;
+    emit(events, SimEvent.Coin, state.tick, kind, i, z);
   }
 }
 

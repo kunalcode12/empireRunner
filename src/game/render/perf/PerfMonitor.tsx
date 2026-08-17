@@ -35,6 +35,8 @@ const isDev = process.env.NODE_ENV !== "production";
 
 /** Rolling frame statistics, sampled without allocating per frame. */
 export interface FrameStats {
+  /** Peak live particles, read from the pool. Reported by the perf gate. */
+  particlePeak: number;
   fps: number;
   minFps: number;
   avgFps: number;
@@ -53,7 +55,9 @@ export interface FrameStats {
  */
 export function useFrameStats(): React.MutableRefObject<FrameStats> {
   const gl = useThree((s) => s.gl);
+  const particlePeakRef = usePeakParticles();
   const stats = useRef<FrameStats>({
+    particlePeak: 0,
     fps: 0,
     minFps: Number.POSITIVE_INFINITY,
     avgFps: 0,
@@ -88,12 +92,31 @@ export function useFrameStats(): React.MutableRefObject<FrameStats> {
 
     s.drawCalls = gl.info.render.calls;
     s.triangles = gl.info.render.triangles;
+    s.particlePeak = particlePeakRef.current;
   });
 
   return stats;
 }
 
+/**
+ * Reads the particle pool's high-water mark.
+ *
+ * Published through the perf HUD rather than through the loop, so the perf gate
+ * has a single place to read every metric from.
+ */
+function usePeakParticles(): React.MutableRefObject<number> {
+  const ref = useRef(0);
+  useFrame(() => {
+    const peak = (window as PerfWindow).__axisParticlePeak;
+    if (typeof peak === "number" && peak > ref.current) {
+      ref.current = peak;
+    }
+  });
+  return ref;
+}
+
 interface PerfWindow extends Window {
+  __axisParticlePeak?: number;
   __axisPerf?: FrameStats;
 }
 

@@ -33,6 +33,9 @@
 
 import { F, Phase, type SimState } from "@/game/sim/state";
 
+/** Half, for the prism offset. */
+const HALF_PRISM = 0.5;
+
 /** Scalar linear interpolation. */
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -200,6 +203,41 @@ const PHASE_TO_ANIMATION: readonly AnimationStateValue[] = [
   AnimationState.Crashed,
   AnimationState.Fracturing,
 ];
+
+/**
+ * Converts a face-local position into world space.
+ *
+ * The sim thinks in `(x, y)` on whichever face is currently the floor. The
+ * scene graph is a fixed prism. Every renderer that places something on a face
+ * — the tunnel, the entities, the rig, the camera, the lighting — does this same
+ * rotate-and-offset, and they must all agree or things drift apart on a roll.
+ *
+ * Particles in particular have to be converted before spawning: handing an
+ * emitter the raw `(x, y, z)` puts every burst on the TUNNEL AXIS rather than at
+ * the player, which is exactly the bug this function was extracted to fix — coin
+ * bursts were appearing near the ceiling.
+ *
+ * @param out reused; do not retain.
+ */
+export function faceLocalToWorld(
+  out: { x: number; y: number; z: number },
+  x: number,
+  y: number,
+  z: number,
+  face: number,
+  prismSize: number,
+): { x: number; y: number; z: number } {
+  const localY = -prismSize * HALF_PRISM + y;
+  const angle = face * (Math.PI / 2);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  // Rotation about the tunnel (z) axis.
+  out.x = x * cos - localY * sin;
+  out.y = x * sin + localY * cos;
+  out.z = -z;
+  return out;
+}
 
 /** Maps a sim `Phase` to its animation state. */
 export function animationForPhase(phase: number): AnimationStateValue {

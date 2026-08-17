@@ -40,16 +40,20 @@ export const GREYBOX = {
  * Per-face tunnel colours, indexed by face id 0..3.
  *
  * Deliberately NOT four different hues. The four faces are the same tunnel and
- * should read as one space; what distinguishes them at a glance is which one is
- * currently the floor, and that is communicated by the camera being on it, not
- * by colour-coding. Two values — the current floor darker than the rest — is
- * enough to keep orientation legible while rolling.
+ * should read as one space; what distinguishes them is which one is currently
+ * underfoot, and that is communicated by the camera, not by colour-coding.
+ *
+ * **Face 0 — the floor — is the LIGHT one.** The first pass had this inverted:
+ * floor gunmetal, walls ash. Looking at a captured frame, the floor came out the
+ * darkest surface on screen and very close to the background it was fogging
+ * into, so the lane the player is actually standing in was the hardest thing to
+ * read. Obstacles sit on the floor; the floor has to be the legible surface.
  */
 export const FACE_COLORS: readonly string[] = [
+  GREYBOX.ash,
   GREYBOX.gunmetal,
-  GREYBOX.ash,
-  GREYBOX.ash,
-  GREYBOX.ash,
+  GREYBOX.gunmetal,
+  GREYBOX.gunmetal,
 ];
 
 /** Obstacle grey-box colour. One value: P07 gives each entity type its own. */
@@ -61,5 +65,18 @@ export const PICKUP_COLOR = GREYBOX.bone;
 /** The player capsule. */
 export const PLAYER_COLOR = GREYBOX.bone;
 
-/** Scene background and fog. Kiln's gunmetal, not black — see the header. */
-export const BACKGROUND_COLOR = GREYBOX.gunmetal;
+/**
+ * Scene background and fog.
+ *
+ * Key-line black, and that is legal rather than a breach. GAME_BIBLE §11.3 bans
+ * "backgrounds darker than the darkest colour in the active theme palette" —
+ * #0b0b0c IS Kiln's darkest entry, so this sits exactly at the limit, not below
+ * it. Nothing darker may ever appear.
+ *
+ * It has to be this rather than gunmetal because the WALLS are gunmetal. With
+ * both the same, the wall/background boundary vanished and the tunnel read as a
+ * floor strip floating in a void instead of an enclosed prism — visible in the
+ * captured frames. Separating them by one palette step is what makes the four
+ * faces read as a space.
+ */
+export const BACKGROUND_COLOR = GREYBOX.keyline;

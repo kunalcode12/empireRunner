@@ -57,20 +57,34 @@ import {
   type InputManager,
 } from "@/game/input";
 import { createEventDrain, type EventDrain, type EventListener } from "./events";
-import { animationForPhase, createRenderView, readInterpolated } from "./interpolate";
+import {
+  animationForPhase,
+  createRenderView,
+  faceLocalToWorld,
+  readInterpolated,
+} from "./interpolate";
+import { TUNING } from "@/game/config/tuning";
 import type { TunnelHandle } from "./Tunnel";
 import type { EntityRendererHandle } from "./EntityRenderer";
-import type { PlayerRigHandle } from "./PlayerRig";
+import type { RunnerRigHandle } from "./animation/RunnerRig";
 import type { CameraRigHandle } from "./CameraRig";
 import type { LightingRigHandle } from "./LightingRig";
+import type { ParticleSystemHandle } from "./vfx/ParticleSystem";
+import type { SpeedLinesHandle } from "./feel/SpeedLines";
+import { createFeel, handleFeelEvent, resetFeel, stepFeel, type FeelState } from "./feel";
+import { emitFootDust, emitOverdriveTrail } from "./vfx/emitters";
+import { nearestHazardX } from "./animation/procedural";
+import { F } from "@/game/sim/state";
 
 /** Everything the loop drives. All refs; all mutated, never re-rendered. */
 export interface GameLoopRefs {
   tunnel: React.MutableRefObject<TunnelHandle | null>;
   entities: React.MutableRefObject<EntityRendererHandle | null>;
-  player: React.MutableRefObject<PlayerRigHandle | null>;
+  player: React.MutableRefObject<RunnerRigHandle | null>;
   camera: React.MutableRefObject<CameraRigHandle | null>;
   lighting: React.MutableRefObject<LightingRigHandle | null>;
+  particles: React.MutableRefObject<ParticleSystemHandle | null>;
+  speedLines: React.MutableRefObject<SpeedLinesHandle | null>;
 }
 
 export interface GameLoopOptions {
@@ -78,8 +92,6 @@ export interface GameLoopOptions {
   seed: number;
   /** Registered before the first frame, so nothing is missed at run start. */
   onEvent?: EventListener;
-  /** Dev-only hook to populate sim state before the first tick. */
-  seedWorld?: (sim: Sim) => void;
   /** Suspends ticking without unmounting. Pause, or a lost window focus. */
   paused?: boolean;
 }
@@ -92,6 +104,11 @@ interface Engine {
   view: ReturnType<typeof createRenderView>;
   frames: number;
   input: InputManager | null;
+  feel: FeelState;
+  /** Reused; where effects spawn. Written each frame before the drain. */
+  feelContext: { playerX: number; playerY: number; playerZ: number; landingSpeed: number };
+  /** Scratch for the face-local -> world conversion. */
+  worldPos: { x: number; y: number; z: number };
 }
 
 export type GameLoopApi = React.MutableRefObject<Engine | null>;
@@ -117,9 +134,17 @@ export type GameLoopApi = React.MutableRefObject<Engine | null>;
  * catch, and it would be genuinely wrong here since it is null on first paint.
  */
 export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameLoopApi {
-  const { seed, onEvent, seedWorld, paused = false } = options;
+  const { seed, onEvent, paused = false } = options;
 
   const engineRef = useRef<Engine | null>(null);
+
+  // The refs object is captured by the event subscription, which is created once
+  // in the mount effect. Holding it behind a ref keeps that closure valid even
+  // if the caller passes a new object.
+  const refsRef = useRef(refs);
+  useEffect(() => {
+    refsRef.current = refs;
+  }, [refs]);
 
   // The listener is held in a ref and refreshed in an effect rather than during
   // render, so swapping it never tears the engine down and restarts the run.
@@ -149,13 +174,25 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       view: createRenderView(),
       frames: 0,
       input: manager,
+      feel: createFeel(),
+      feelContext: { playerX: 0, playerY: 0, playerZ: 0, landingSpeed: 0 },
+      worldPos: { x: 0, y: 0, z: 0 },
     };
 
     // Subscribed through a ref so changing the listener does not tear the engine
     // down and restart the run.
-    const unsubscribe = engine.drain.subscribe((event) => listenerRef.current?.(event));
+    // Feel first, then any external listener. The feel layer must see every
+    // event even when nobody else is listening.
+    const unsubscribe = engine.drain.subscribe((event) => {
+      const pool = refsRef.current.particles.current?.pool;
+      if (pool !== undefined) {
+        handleFeelEvent(engine.feel, event, pool, engine.feelContext);
+      }
+      listenerRef.current?.(event);
+    });
 
-    seedWorld?.(engine.sim);
+    resetFeel(engine.feel);
+
     engineRef.current = engine;
 
     return () => {
@@ -163,7 +200,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       manager.dispose();
       engineRef.current = null;
     };
-  }, [seed, seedWorld]);
+  }, [seed]);
 
   /**
    * A backgrounded tab must DROP its accumulated time, not simulate it.
@@ -218,17 +255,89 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       engine.clock.alpha,
     );
 
-    // 4. Write transforms. Direct Object3D mutation, no React involved.
-    refs.tunnel.current?.update(view.distance, view.roll);
-    refs.entities.current?.update(sim.getState());
-    refs.player.current?.update(
+    // 4. Events, drained BEFORE the transforms.
+    //
+    //    Order reversed at the feel pass, and it matters: a Crash event requests
+    //    a hit-stop, and hit-stop has to be known before the transforms are
+    //    decided or the freeze starts one frame late — which is a sixth of the
+    //    whole 90ms effect.
+    // WORLD space, not face-local. Emitters place particles directly into the
+    // scene, so handing them the sim's face-local coordinates puts every burst
+    // on the tunnel axis instead of at the runner.
+    const world = faceLocalToWorld(
+      engine.worldPos,
       view.x,
       view.y,
       view.z,
       view.face,
-      animationForPhase(view.phase),
-      delta,
+      TUNING.geometry.prismInnerSize,
     );
+    engine.feelContext.playerX = world.x;
+    engine.feelContext.playerY = world.y;
+    engine.feelContext.playerZ = world.z;
+    engine.drain.drain(sim.events);
+
+    // 5. Feel. Decays trauma and the aberration pulse, and reports whether the
+    //    picture is frozen this frame.
+    const held = stepFeel(engine.feel, delta);
+
+    // 6. HIT-STOP.
+    //
+    //    The sim already ticked above and will keep ticking; only the picture
+    //    holds. Freezing the sim instead would hand the player free time, break
+    //    input, and make the run unreplayable on a server with no renderer —
+    //    law (a). The world snapping forward when the freeze lifts IS the
+    //    effect.
+    //
+    //    Particles keep integrating: debris frozen mid-air reads as a bug, and
+    //    the burst that caused the freeze should already be expanding when the
+    //    picture resumes.
+    const worldDelta = held ? 0 : view.worldSpeed * delta;
+    refs.particles.current?.update(delta, worldDelta);
+
+    if (held) {
+      return;
+    }
+
+    // 7. Write transforms. Direct Object3D mutation, no React involved.
+    refs.tunnel.current?.update(view.distance, view.roll);
+    refs.entities.current?.update(sim.getState());
+
+    const animation = animationForPhase(view.phase);
+    const runner = refs.player.current;
+    if (runner !== null) {
+      runner.setContext({
+        distance: view.distance,
+        laneBias: intent.lateral,
+        worldRoll: view.roll,
+        hazardX: nearestHazardX(sim.getState().obstacles, view.face),
+        verticalSpeed: sim.getState().f[F.playerVy] ?? 0,
+      });
+      runner.update(view.x, view.y, view.z, view.face, animation, delta);
+
+      // Foot dust, from the rig's own stride phase rather than a timer — so a
+      // puff lands exactly when a foot does, at any speed.
+      const contact = runner.footContact;
+      const pool = refs.particles.current?.pool;
+      if (contact.stepped && pool !== undefined) {
+        emitFootDust(pool, contact.x, contact.y, contact.z);
+      }
+    }
+
+    // The Overdrive trail, while the window is open.
+    const pool = refs.particles.current?.pool;
+    if (pool !== undefined && (sim.getState().f[F.overdriveTimer] ?? 0) > 0) {
+      engine.feel.trailAccumulator = emitOverdriveTrail(
+        pool,
+        world.x,
+        world.y,
+        world.z,
+        delta,
+        engine.feel.trailAccumulator,
+      );
+    }
+
+    const shake = engine.feel.trauma.offset;
     refs.camera.current?.update(
       view.x,
       view.y,
@@ -237,12 +346,10 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       view.worldSpeed,
       intent.lateral,
       delta,
+      shake,
     );
     refs.lighting.current?.update(view.x, view.y, view.face);
-
-    // 5. Events. Drained after the transforms so a listener that reads a
-    //    transform sees this frame's, not last frame's.
-    engine.drain.drain(sim.events);
+    refs.speedLines.current?.update(view.worldSpeed);
   });
 
   return engineRef;

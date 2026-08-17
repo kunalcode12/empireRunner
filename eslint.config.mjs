@@ -289,7 +289,17 @@ export default defineConfig([
     //   unreadable to the person authoring the 33rd, which is exactly who they
     //   are written for. Chunk files contain no branches and no arithmetic; if
     //   one ever does, it wants to be two chunks instead.
-    ignores: ["src/game/config/**", "src/game/sim/level/chunks/**"],
+    ignores: [
+      "src/game/config/**",
+      "src/game/sim/level/chunks/**",
+      // Pose data. Identical case to the chunks: a pose is a list of joint
+      // angles and every number IS the content. These are PRESENTATION values —
+      // none can change a gameplay outcome, which is what the tuning.ts rule
+      // actually protects. Values that affect feel ACROSS clips (swing, bob,
+      // lean, blend times) live in TUNING.animation, not here.
+      "src/game/render/animation/clips.ts",
+      "src/game/render/animation/rig.ts",
+    ],
     rules: {
       "no-magic-numbers": [
         "error",

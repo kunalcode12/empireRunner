@@ -21,8 +21,8 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P03** | Input layer | keyboard / touch / gamepad → normalised intent stream; input buffer, coyote time, stick hysteresis, two-finger roll gesture | Unit tests for buffer + coyote windows; a real device playtest of the two-finger roll (GAME_BIBLE §13 Q2 answered) | **Complete (code) · gate PARTIAL** |
 | **P04** | Player controller | 12-position face/lane state machine, jump/slide/lane/roll, asymmetric gravity, swept AABB collision, roll commit lock | Headless: all 6 verbs produce the exact durations in TUNING.md; `newLane === 2 - oldLane` across rolls; no tunnelling at `maxSpeed` | **Complete** |
 | **P05** | Render bridge & camera | r3f canvas, `dynamic(ssr:false)` mount, four-face prism geometry, runner mesh, snapshot interpolation, camera rig, r3f-perf, leva | Game boots and runs at 60fps; `< 100` draw calls desktop, `< 50` mobile; roll reads correctly and the reduced-motion path works | **Complete (code) · gate PARTIAL** — draw calls 15/10 measured, both budgets met; **fps unverified on real hardware**, reduced-motion and leva deferred |
-| **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | **Complete (not wired live)** |
-| **P07** | Entity catalogue | All 12 obstacles, 4 hazards, 7 pickups; instanced + pooled rendering; collision resolution; near-miss detection | Every entity in GAME_BIBLE §7 spawns, renders, and is defeated by exactly its listed verbs; near-miss fires at 0.45u surface-to-surface | Not started |
+| **P06** | Track generator | Seeded chunk generation, difficulty bands, 4-face authoring, reachability solver, chunk recycling | **10,000-seed fuzz: zero unwinnable spawns**; `minReactionTime` 0.55s never violated at any speed; band density matches TUNING.md §10 | **Complete · WIRED LIVE at P07** |
+| **P07** | Entity catalogue | All 12 obstacles, 4 hazards, 7 pickups; instanced + pooled rendering; collision resolution; near-miss detection | Every entity in GAME_BIBLE §7 spawns, renders, and is defeated by exactly its listed verbs; near-miss fires at 0.45u surface-to-surface | **Complete (12 obstacles + 7 pickups) · 4 hazards deferred** |
 | **P08** | Flow & Overdrive | Flow meter, all gain/decay sources, multiplier, flow→speed coupling, Overdrive mode + palette inversion + shatter | Flow math matches TUNING.md §9.1 in headless tests; Overdrive lasts exactly 6.0s, exits at 25 Flow; crash zeroes Flow | **Complete (sim only — gains cannot fire, nothing spawns)** |
 | **P09** | Fracture & cosmetic physics | ~~Death freeze, correct-verb solver, 1.2s slow-mo window, resume~~ (landed at P08); Rapier v2 debris and ragdolls; the palette inversion and Overdrive/Fracture visuals | Solver picks the single clearing verb; arms only on single-answer deaths; **Rapier never writes to sim** (boundary test) | Sim half **Complete** at P08 · render half Not started |
 | **P10** | Themes & art direction | Screen-print materials, key-lines, halftone, the four themes, transition tunnels, posterised fog | All four themes render at ≤ 6 colours; zero bloom outside Overdrive; the §11.3 ban holds under review; draw calls still in budget | Not started |
@@ -46,6 +46,134 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-17 — P07 + feel · Live generator, animation, impact, particles — **Complete (code) · fps gate PARTIAL**
+
+**Verify gate**
+
+```
+> tsc --noEmit         (clean)
+> eslint .             (clean, 0 errors 0 warnings)
+> vitest run           Test Files 32 passed | Tests 756 passed (was 659)
+> next build           ✓ / · /_not-found · /play
+> prettier --check .   clean
+```
+
+**Measured — 3 minutes of running play, `tests/e2e/perf.spec.ts`**
+
+```
+                        desktop-chromium
+  frames rendered            3,455
+  fps  min                    15.4     ⚠ software rasteriser — NOT representative
+  fps  avg                    19.0     ⚠ as above
+  fps  p1                     17.4     ⚠ as above
+  draw calls peak               16     budget < 100                            ✅
+  triangles peak            47,560
+  particle peak                 51
+  JS heap growth               0 KB    over 180 seconds                        ✅
+```
+
+⚠️ **The FPS figures are still worthless.** Headless Chromium is software-rastered.
+Draw calls, triangles, particle peak and heap growth are exact and
+environment-independent; frame rate is not. **Nobody has run this on real
+hardware.** No clip was recorded either — I have no display. What I did instead
+was capture real PNG frames through Playwright and look at them, which is how
+three of the bugs below were found.
+
+**0 KB heap growth over three minutes** with particles, animation and shake all
+running is the number worth trusting. The pooling holds.
+
+---
+
+**Part 1 — the generator is LIVE.** The approved unblock, and what turns this
+into a game.
+
+| Shipped | |
+|---|---|
+| `sim/generator.ts` | Real spawning from the P06 chunk generator: scroll, recycle, bounded per tick |
+| `config/entities.ts` | **Real per-entity colliders**, derived from numbers the design already commits to |
+| `collision.ts` | Real contact classifier; pickup collection emitting `Coin` |
+
+- `classifyContact` was deciding fatal-vs-stumble on **the parity of the kind
+  id**. Now: blocks-every-vertical → Fatal, leaves-an-out → Stumble.
+- Every obstacle shared **one 0.5u cube** hitbox. A Low Bar's box now starts at
+  `lowBarClearance`; a High Gate's ends at `highGateClearance`.
+- **The cross-check P06 deferred now exists** — a test asserting the solver's
+  blocking model and the real colliders agree, for all 8 obstacle types.
+- Consequence: **a passive player now dies to real geometry**, and `Coin`,
+  `NearMiss`, `Crash` and `Stumble` fire in a live run for the first time.
+
+**Part 2 — the feel layer.**
+
+| Shipped | |
+|---|---|
+| `animation/` | Procedural rig: 11 primitives, 10 clips, per-PAIR cross-fades, 3 procedural layers |
+| `feel/` | Hit-stop, trauma shake, squash/stretch, speed lines, reduced motion |
+| `vfx/` | One pooled instanced particle system + 5 emitters |
+
+- **The run cycle is driven by DISTANCE, not time**, so the feet never skate at
+  any speed from 12 to 34 u/s. Asserted at both extremes.
+- **Cross-fades are per pair**: run→jump 0.06s, jump→fall 0.12s, land→run 0.10s,
+  →slide 0.05s, →crash 0.03s. One global value is wrong for all of them.
+- **Hit-stop freezes presentation only. The sim keeps ticking.** Freezing the sim
+  would hand the player free time and make the run unreplayable server-side.
+- **Shake is trauma², driven by gradient noise, never a sine.** A test asserts
+  that no lag from 1 to 60 frames reproduces the signal — genuinely aperiodic.
+- **Squash scales with impact velocity** and preserves volume.
+- **Speed lines are invisible below 17 u/s**, so they are in effect a readout of
+  the Flow coupling.
+- **The runner is ONE draw call** — 11 instanced boxes — and the whole particle
+  system is one more.
+
+**Reduced motion** disables shake, aberration, speed lines, the camera's roll
+lean and squash. It **keeps** hit-stop (a pause, not motion, and the clearest
+non-auditory hit signal), the roll itself (§3.2 — the world rotating IS the
+game), the FOV ramp at 40% (removing it leaves the player unable to judge
+approach speed) and head tracking at 50% (it points at the hazard, so it is
+information). Forced with `?motion=reduced`.
+
+---
+
+**Seven bugs found**
+
+1. **The suite hung for 10 minutes.** `sim.tick()` no-ops once the run ends, so
+   `state.tick` stops advancing — and a perf test looped `while (tick < 72000)`.
+   Invisible until the player could die. Added `tests/helpers/drive.ts`.
+2. **`applyFatal` was not idempotent** — a second fatal hit threw
+   `CRASHED --FatalHit-->` in dev and silently no-op'd in prod, exactly the
+   dev/prod divergence the guard must not cause.
+3. **Renderer and collision computed lane centres separately**, so multi-lane
+   walls would have drawn a full lane from their hitbox. Both now read one `x`.
+4. **Particles spawned on the tunnel axis, not at the player** — coin bursts
+   appeared near the ceiling. Emitters were handed face-local coordinates where
+   world space was needed. Found by looking at a frame.
+5. **Every clip returned the same shared scratch object**, so holding two clip
+   results at once silently gave the same one. Works in the rig (which copies
+   immediately) but a real trap. Found by a test comparing seven clips that got
+   seven identical silhouettes.
+6. **The palette was backwards** — floor gunmetal, walls ash — making the floor
+   the darkest surface on screen. Inverting it crushed the gunmetal walls to
+   ~#101010, a genuine §11.3 breach; fixed by making them unlit, which §11.1
+   wants anyway. Then walls and background matched and the tunnel read as a floor
+   strip in a void, so the background moved to key-line black.
+7. **`docs/ARCHITECTURE.md` §5 claimed the transcendental ban was NOT ENFORCED.**
+   It shipped at P01. That row had been wrong for eight phases.
+
+**Deliberately NOT done**
+
+- **Post-processing, Overdrive presentation, Fracture presentation, and the
+  cosmetic Rapier world.** Deferred by agreement when this phase was split; they
+  are the next pass. The `aberration` pulse is already published for the post-FX
+  stack to consume.
+- **Hazards** (Ember Vent, Surge, Sand Curtain, Dropout) — GAME_BIBLE §7.2. The
+  12 obstacles and 7 pickups spawn; the 4 theme hazards do not.
+- **The balance harness is now obsolete.** With real geometry its survival model
+  layers fake deaths on top of real ones. Made model-authoritative as a stopgap
+  and documented; it wants replacing with a scripted-input policy measuring
+  genuine deaths.
+- **leva** is still not mounted.
+
+---
 
 ### 2026-08-17 — P05 · Render bridge & camera — **Complete (code) · gate PARTIAL**
 

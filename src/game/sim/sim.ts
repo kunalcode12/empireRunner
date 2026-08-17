@@ -30,7 +30,7 @@
 import { TUNING } from "../config/tuning";
 import { stepCollision } from "./collision";
 import { createEventRing, emit, resetEventRing, SimEvent, type EventRing } from "./events";
-import { stepGenerator } from "./generator";
+import { createSpawnState, resetSpawnState, stepGenerator } from "./generator";
 import { hashState } from "./hash";
 import { createIntent, sanitizeIntent, type Intent } from "./intent";
 import { stepPlayer } from "./player";
@@ -98,6 +98,11 @@ export function createSim(seed: number): Sim {
   // the sim never holds a reference to caller-owned mutable data.
   const scratchIntent = createIntent();
 
+  // Track spawning. Held here rather than in SimState for the same reason the
+  // RNG streams are: it is a pure function of the seed and the tick count, so a
+  // re-simulation rebuilds it identically and it needs no place in the hash.
+  const spawnState = createSpawnState();
+
   const seeds: RngSeeds = { generator: 0, pickup: 0, cosmetic: 0 };
 
   function deriveSeeds(runSeed: number): void {
@@ -126,6 +131,7 @@ export function createSim(seed: number): Sim {
     resetState(current, seeds);
     resetState(previous, seeds);
     resetEventRing(events);
+    resetSpawnState(spawnState);
     loadRngFromState(current);
 
     current.runStatus = RunStatus.Running;
@@ -169,8 +175,8 @@ export function createSim(seed: number): Sim {
     const metres = stepDifficulty(current, events);
 
     if (!inFracture) {
-      // 4. spawn                                                     [P06 stub]
-      stepGenerator(current, generatorRng, pickupRng, events);
+      // 4. spawn
+      stepGenerator(current, spawnState, generatorRng, events, FIXED_DELTA);
 
       // 5. collision
       stepCollision(current, FIXED_DELTA, events);

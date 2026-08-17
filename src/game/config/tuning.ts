@@ -452,6 +452,30 @@ export const TUNING = {
     /** x — fraction of unused slots that receive pickups. OPEN. */
     pickupSlotRatio: 0.55,
 
+    // ── P07 — live spawning ───────────────────────────────────────────────────
+    /** u — how far ahead of the player a chunk is spawned.
+     *
+     *  Must exceed the longest fog distance (Bazaar, 70u) so geometry is never
+     *  seen popping into existence, and must exceed
+     *  `minReactionTime * maxSpeed` = 18.7u by a wide margin so the player has
+     *  time to read it. 96u is four chunks. OPEN. */
+    spawnAhead: 96.0,
+
+    /** u — how far behind the player an entity is recycled.
+     *
+     *  Far enough to be off camera at any FOV: the camera sits `cameraDistance`
+     *  7.5u back, and at 82 degrees the near geometry is wide. 24u is a full
+     *  chunk of slack. OPEN. */
+    despawnBehind: 24.0,
+
+    /** count — chunks that may be emitted in a single tick.
+     *
+     *  A bound on the catch-up loop, for the same reason the clock has
+     *  `maxTicksPerFrame`: an unbounded loop turns one slow moment into a stall.
+     *  In steady state the world advances at most 0.567u per tick against a 24u
+     *  chunk, so this never binds — it exists for the pathological case. */
+    maxChunksPerTick: 2,
+
     /** Difficulty bands, keyed by distance travelled. Density does NOT rise past
      *  the last band — beyond it, escalation comes from worldSpeed alone. */
     bands: [
@@ -848,11 +872,25 @@ export const TUNING = {
     /** u — near/far span of the shadow camera. */
     shadowFrustumDepth: 80.0,
 
-    /** x — hemisphere fill intensity. Keeps unlit faces from going to flat black,
-     *  which GAME_BIBLE §11.3 bans outright. */
-    hemisphereIntensity: 0.55,
-    /** x — key directional intensity. */
-    directionalIntensity: 1.15,
+    /** x — hemisphere fill intensity.
+     *
+     *  Dominant on purpose, with the key light kept low. Two reasons:
+     *
+     *  1. GAME_BIBLE §11.3 bans anything darker than the theme palette. With a
+     *     directional-dominant setup, gunmetal #2b2b2f on a VERTICAL surface
+     *     lands near #111111 — measured from a captured frame — because a wall
+     *     normal catches almost nothing from an overhead key. The tunnel walls
+     *     crushed to black and broke the ban.
+     *  2. §11.1 wants flat colour fields, not modelled form. A high fill and a
+     *     weak key gets surfaces close to their actual albedo, which is what
+     *     "every surface is one flat colour" asks for.
+     *
+     *  The key is kept non-zero only so the player still casts a contact shadow,
+     *  which is the one depth cue the grey-box cannot do without. */
+    hemisphereIntensity: 1.35,
+    /** x — key directional intensity. Low: it is here for the shadow, not the
+     *  shading. See the note above. */
+    directionalIntensity: 0.55,
 
     /** u — the player's fixed z offset from the origin. Law (b): the player stays
      *  near origin and the world moves past. Non-zero only so the camera has
@@ -865,6 +903,243 @@ export const TUNING = {
      *  flash of the loading screen, which reads as a rendering glitch rather than
      *  as loading. */
     minLoadingSeconds: 0.35,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 15c. Character animation — P09-feel
+  //
+  // The runner is built from primitives and animated procedurally. There is no
+  // rigged model in the repo and none is referenced — a blocky character that
+  // moves well reads better than a detailed one that T-poses.
+  // ───────────────────────────────────────────────────────────────────────────
+  animation: {
+    /** u — world distance per stride.
+     *
+     *  **This is why the feet never skate.** The run cycle's phase is driven by
+     *  DISTANCE, not by elapsed time: `phase = distance / strideLength`. A
+     *  time-driven cycle has to be rate-matched to speed by hand and drifts the
+     *  moment speed changes, which at a `worldSpeed` that ranges 12–34 u/s is
+     *  constantly. Driving from distance makes the match exact by construction —
+     *  one stride always covers one stride's worth of ground. OPEN. */
+    strideLength: 2.05,
+
+    /** rad — hip/shoulder swing amplitude at the extremes of the run cycle. */
+    runSwing: 0.85,
+    /** u — vertical bob over one stride. Two bounces per stride, as in a real gait. */
+    runBob: 0.075,
+    /** rad — forward torso pitch while running. Leaning in reads as intent. */
+    runLean: 0.16,
+
+    /** rad — limb pose while airborne: legs tucked, arms up. */
+    jumpTuck: 0.7,
+    /** rad — falling reach. Distinct from the jump tuck so the apex is readable. */
+    fallReach: 0.45,
+    /** rad — torso pitch while sliding. Nearly flat. */
+    slidePitch: 1.15,
+    /** rad — stumble flail amplitude. */
+    stumbleFlail: 1.0,
+    /** Hz — how fast the stumble flails. Fast and ugly on purpose. */
+    stumbleFrequency: 9.0,
+
+    // ── Procedural layer, applied ON TOP of the pose ────────────────────────
+    /** rad — how far the body banks into a lane change, at full deflection. */
+    leanIntoLane: 0.34,
+    /** 1/s — how fast that bank arrives and leaves. */
+    leanRate: 9.0,
+
+    /** rad — torso counter-rotation during a roll.
+     *
+     *  The world spins 90 degrees around the player. If the body spins with it
+     *  the roll is invisible — the player is static relative to their own frame.
+     *  Counter-rotating the torso AGAINST the world makes the runner look like
+     *  they are driving the roll rather than being carried by it. */
+    rollCounterRotation: 0.55,
+    /** 1/s — how fast the counter-rotation unwinds after the roll completes. */
+    rollCounterRate: 7.0,
+
+    /** rad — maximum head yaw when tracking a hazard. */
+    headTrackMax: 0.6,
+    /** 1/s — head tracking responsiveness. Slower than the body: a head snap
+     *  reads as a twitch rather than as attention. */
+    headTrackRate: 5.5,
+    /** u — only hazards within this distance are worth looking at. */
+    headTrackRange: 22.0,
+
+    // ── Cross-fade durations, PER PAIR ──────────────────────────────────────
+    //
+    // One global blend time is the single most common animation mistake. A
+    // jump has to leave the ground instantly or the character feels heavy; a
+    // landing has to settle rather than snap. Those want opposite values, and a
+    // compromise is wrong for both.
+    /** s — default when a pair is not listed below. */
+    blendDefault: 0.09,
+    /** s — run into jump. Fast: the launch must be instant. */
+    blendRunToJump: 0.06,
+    /** s — jump into fall. Slow: this is the apex hang, and it is the one moment
+     *  the arc should feel floaty. */
+    blendJumpToFall: 0.12,
+    /** s — land into run. Medium: the settle. */
+    blendLandToRun: 0.1,
+    /** s — anything into slide. Fast; a slide is a commitment. */
+    blendToSlide: 0.05,
+    /** s — into a crash. Near-instant: the impact is the point. */
+    blendToCrash: 0.03,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 15d. Impact feel — P09-feel
+  //
+  // Everything here is PRESENTATION. Nothing in this section may change a
+  // gameplay outcome, and nothing reads anything but sim events and interpolated
+  // sim state.
+  // ───────────────────────────────────────────────────────────────────────────
+  feel: {
+    /** s — frozen render time on a fatal crash.
+     *
+     *  **Hit-stop does more for impact than any particle system.** Freezing the
+     *  presentation for a few frames lets the brain register that two things
+     *  touched; without it a collision is just a state change. The sim keeps
+     *  ticking underneath — only the picture holds.
+     *
+     *  60–90ms is the band where it reads as impact rather than as a dropped
+     *  frame. Below ~50ms nobody perceives it; above ~120ms it reads as a hitch. */
+    hitStopCrash: 0.09,
+    /** s — frozen render time when an obstacle shatters during Overdrive.
+     *  Shorter than a crash: it happens repeatedly and must not stack into a
+     *  stutter. */
+    hitStopShatter: 0.06,
+    /** s — hard ceiling on accumulated hit-stop, so a burst of shatters in one
+     *  frame cannot freeze the game. */
+    hitStopMax: 0.12,
+
+    // ── Trauma-based screen shake ───────────────────────────────────────────
+    //
+    // A single `trauma` value in [0,1] that decays linearly, with the actual
+    // offset driven by `trauma^2`. The square is what makes it feel right: a
+    // small trauma produces almost nothing, a large one produces a lot, and the
+    // tail-off is fast rather than a long linear fade.
+    //
+    // The offset comes from noise, NEVER a sine. A fixed sine wobble is
+    // instantly recognisable as fake — it is periodic, so the eye locks onto the
+    // rhythm — whereas noise reads as a physical jolt.
+    /** trauma — added on a fatal crash. Full. */
+    traumaCrash: 1.0,
+    /** trauma — added on a stumble. */
+    traumaStumble: 0.42,
+    /** trauma — added on a near-miss. Small; near-misses are frequent. */
+    traumaNearMiss: 0.16,
+    /** trauma — added on a shatter. */
+    traumaShatter: 0.3,
+    /** trauma — maximum added on a hard landing, scaled by impact velocity. */
+    traumaLanding: 0.22,
+    /** trauma/s — decay rate. */
+    traumaDecay: 1.7,
+    /** u — positional shake at trauma 1.0. */
+    shakeMaxOffset: 0.34,
+    /** rad — rotational shake at trauma 1.0. Roll only; yaw/pitch shake on a
+     *  first-person-adjacent camera is nauseating. */
+    shakeMaxRoll: 0.055,
+    /** Hz — how fast the noise is sampled. High enough to read as a jolt rather
+     *  than a sway. */
+    shakeFrequency: 24.0,
+
+    // ── Landing squash and stretch ──────────────────────────────────────────
+    /** x — maximum vertical compression on a hard landing. 0.35 means the body
+     *  squashes to 65% height at peak. */
+    squashMax: 0.32,
+    /** u/s — impact speed that produces the maximum squash. Below this the
+     *  squash scales down linearly, so a small hop barely registers. */
+    squashFullImpactSpeed: 11.0,
+    /** 1/s — how fast the squash springs back out. */
+    squashRecovery: 13.0,
+    /** x — how much the body stretches while rising fast. Subtle. */
+    stretchMax: 0.14,
+
+    // ── Speed lines ─────────────────────────────────────────────────────────
+    /** count — radial line instances. One draw call regardless. */
+    speedLineCount: 110,
+    /** u/s — world speed at which lines begin to appear at all. Below this they
+     *  are fully invisible: at base speed the screen must be clean. */
+    speedLineOnsetSpeed: 17.0,
+    /** u — inner radius of the radial field, so lines never cross the runner. */
+    speedLineInnerRadius: 2.6,
+    /** u — outer radius. */
+    speedLineOuterRadius: 9.0,
+    /** u — line length at onset speed. */
+    speedLineMinLength: 0.7,
+    /** u — line length at maxSpeed. */
+    speedLineMaxLength: 5.5,
+    /** x — opacity at maxSpeed. Never fully opaque; these are a hint of motion,
+     *  not a curtain. */
+    speedLineMaxOpacity: 0.42,
+
+    // ── Near-miss ───────────────────────────────────────────────────────────
+    //
+    // Near-misses must feel REWARDING. This is the feedback that teaches the
+    // entire Flow system without a tutorial: the player learns that shaving an
+    // obstacle pays, because the game visibly rewards it the first time it
+    // happens by accident.
+    /** s — how long the near-miss pulse lasts. */
+    nearMissPulseDuration: 0.28,
+    /** x — peak intensity of the aberration pulse. Consumed by the post-FX pass
+     *  when it lands; GAME_BIBLE §11.3 permits chromatic aberration ONLY as a
+     *  transient, which is exactly what this is. */
+    nearMissPulseStrength: 0.65,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 15e. Particles — P09-feel
+  //
+  // One pooled system, instanced quads, one draw call. Per-particle React
+  // components would be thousands of reconciling elements per second.
+  // ───────────────────────────────────────────────────────────────────────────
+  particles: {
+    /** count — hard cap on live particles, by quality tier. The pool is
+     *  allocated at the HIGH size once and the cap merely limits how much of it
+     *  is used, so changing tier never reallocates. */
+    maxHigh: 1024,
+    maxMedium: 512,
+    maxLow: 0,
+
+    /** s — how long a foot-dust puff lives. */
+    dustLife: 0.45,
+    /** u — dust puff size. */
+    dustSize: 0.16,
+    /** count — puffs per footfall. */
+    dustPerStep: 3,
+    /** u/s — initial upward drift on dust. */
+    dustRise: 0.9,
+
+    /** count — particles in a coin-collect burst. */
+    coinBurst: 10,
+    /** s — coin burst lifetime. Short and bright. */
+    coinLife: 0.35,
+    /** u — coin particle size. */
+    coinSize: 0.11,
+    /** u/s — coin burst outward speed. */
+    coinSpeed: 3.4,
+
+    /** count — debris pieces when an obstacle shatters. */
+    shatterBurst: 22,
+    /** s — shatter debris lifetime. */
+    shatterLife: 0.8,
+    /** u — shatter piece size. */
+    shatterSize: 0.2,
+    /** u/s — shatter outward speed. */
+    shatterSpeed: 6.5,
+
+    /** count — Overdrive trail particles emitted per second. */
+    trailPerSecond: 55,
+    /** s — trail particle lifetime. */
+    trailLife: 0.55,
+    /** u — trail particle size. */
+    trailSize: 0.18,
+
+    /** u/s² — downward acceleration on debris. Cosmetic gravity; nothing here
+     *  touches the sim's own gravity, which is solved from jumpApexTime. */
+    gravity: -14.0,
+    /** x — per-second velocity damping, so bursts settle rather than fly off. */
+    drag: 0.88,
   },
 
   // ───────────────────────────────────────────────────────────────────────────

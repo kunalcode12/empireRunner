@@ -39,7 +39,6 @@ export interface GameCanvasProps {
   seed?: number;
   onEvent?: EventListener;
   paused?: boolean;
-  seedWorld?: boolean;
 }
 
 const DEFAULT_SEED = 1;
@@ -48,7 +47,6 @@ export function GameCanvas({
   seed = DEFAULT_SEED,
   onEvent,
   paused,
-  seedWorld,
 }: GameCanvasProps): React.ReactElement {
   const quality = getQuality();
 
@@ -92,7 +90,7 @@ export function GameCanvas({
             }
           }}
         >
-          <Scene seed={seed} onEvent={onEvent} paused={paused} seedWorld={seedWorld} />
+          <Scene seed={seed} onEvent={onEvent} paused={paused} />
         </Canvas>
       </Suspense>
     </div>

@@ -10,8 +10,25 @@ import {
   sweptOverlap,
 } from "@/game/sim/collision";
 import { createAabb, obstacleAabb, playerAabb, separation } from "@/game/sim/player/collider";
+import { entityCollider } from "@/game/config/entities";
+import { EntityType } from "@/game/sim/level/entities";
 
 const DT = TUNING.sim.fixedDelta;
+
+/**
+ * Obstacle extents come from the real catalogue as of P07, not from a 0.5u
+ * placeholder cube. These tests position geometry relative to the player's box,
+ * so they have to ask the catalogue how wide the thing actually is — hardcoding
+ * 0.5 silently changed what each test was measuring the moment colliders
+ * became real.
+ */
+/** A Stack: fatal, and wide enough to graze deliberately. */
+const GRAZE_KIND = EntityType.Stack;
+const grazeHalfWidth = (): number => entityCollider(GRAZE_KIND).halfWidth;
+/** An unknown kind, which the catalogue treats as inert — so contact is a Pass
+ *  and the near-miss path is what gets exercised. */
+const INERT_KIND = -1;
+const inertHalfWidth = (): number => entityCollider(INERT_KIND).halfWidth;
 const MAX_SPEED = TUNING.speed.maxSpeed;
 
 /** Adds an obstacle to a state and returns its index. */
@@ -228,9 +245,9 @@ describe("corner forgiveness", () => {
     const player = createAabb();
     playerAabb(player, Phase.Running, 0, 0, 0);
     const graze = TUNING.collision.cornerForgiveness * 0.5;
-    const obstacleX = player.hx + 0.5 - graze;
+    const obstacleX = player.hx + grazeHalfWidth() - graze;
 
-    addObstacle(state, 2, 0, 1, obstacleX, 0, 0);
+    addObstacle(state, GRAZE_KIND, 0, 1, obstacleX, 0, 0);
     stepCollision(state, DT, events);
 
     expect(state.player.phase, "a graze must not kill").toBe(Phase.Running);
@@ -245,7 +262,7 @@ describe("corner forgiveness", () => {
     const player = createAabb();
     playerAabb(player, Phase.Running, 0, 0, 0);
     const graze = TUNING.collision.cornerForgiveness * 0.5;
-    addObstacle(state, 2, 0, 1, player.hx + 0.5 - graze, 0, 0);
+    addObstacle(state, GRAZE_KIND, 0, 1, player.hx + grazeHalfWidth() - graze, 0, 0);
 
     stepCollision(state, DT, events);
 
@@ -264,7 +281,7 @@ describe("corner forgiveness", () => {
     const player = createAabb();
     playerAabb(player, Phase.Running, 0, 0, 0);
     const deep = TUNING.collision.cornerForgiveness * 3;
-    addObstacle(state, 2, 0, 1, player.hx + 0.5 - deep, 0, 0);
+    addObstacle(state, GRAZE_KIND, 0, 1, player.hx + grazeHalfWidth() - deep, 0, 0);
 
     stepCollision(state, DT, events);
     expect(state.player.phase).toBe(Phase.Crashed);
@@ -282,7 +299,7 @@ describe("near-miss detection", () => {
     playerAabb(player, Phase.Running, 0, 0, 0);
     // Separated laterally by less than the near-miss radius.
     const gap = TUNING.flow.nearMissRadius * 0.5;
-    addObstacle(state, -1, 0, 1, player.hx + 0.5 + gap, 0, 0);
+    addObstacle(state, INERT_KIND, 0, 1, player.hx + inertHalfWidth() + gap, 0, 0);
 
     stepCollision(state, DT, events);
 
@@ -299,7 +316,7 @@ describe("near-miss detection", () => {
     const player = createAabb();
     playerAabb(player, Phase.Running, 0, 0, 0);
     const gap = TUNING.flow.nearMissRadius * 2;
-    addObstacle(state, -1, 0, 1, player.hx + 0.5 + gap, 0, 0);
+    addObstacle(state, INERT_KIND, 0, 1, player.hx + inertHalfWidth() + gap, 0, 0);
 
     stepCollision(state, DT, events);
     expect(firstEventOfType(events, SimEvent.NearMiss)).toBe(-1);
@@ -314,7 +331,15 @@ describe("near-miss detection", () => {
 
     const player = createAabb();
     playerAabb(player, Phase.Running, 0, 0, 0);
-    addObstacle(state, -1, 0, 1, player.hx + 0.5 + TUNING.flow.nearMissRadius * 0.5, 0, 0);
+    addObstacle(
+      state,
+      INERT_KIND,
+      0,
+      1,
+      player.hx + inertHalfWidth() + TUNING.flow.nearMissRadius * 0.5,
+      0,
+      0,
+    );
 
     for (let i = 0; i < 20; i += 1) {
       stepCollision(state, DT, events);

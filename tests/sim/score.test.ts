@@ -16,6 +16,7 @@ import {
   scoreMultiplier,
 } from "@/game/sim/scoring/score";
 import { startOverdrive } from "@/game/sim/scoring/overdrive";
+import { driveEmpty } from "../helpers/drive";
 
 const TICK_RATE = TUNING.sim.tickRate;
 const SCALE = TUNING.scoring.scoreFixedPointScale;
@@ -82,9 +83,11 @@ describe("determinism over a 20-minute run", () => {
   /** A full-length run with no input at all. */
   function runIdle(seed: number): { score: number; fixed: number; hash: number } {
     const sim = createSim(seed);
-    for (let i = 0; i < TWENTY_MINUTES; i += 1) {
-      sim.tick(idle());
-    }
+    // driveEmpty: this measures the ACCUMULATOR, not survival. With the
+    // generator live an idle player dies in under a minute, and the pinned
+    // value below would then be a measurement of how quickly seed 0x5c04e
+    // kills you rather than of whether the score drifts.
+    driveEmpty(sim, TWENTY_MINUTES);
     return {
       score: getScore(sim.getState()),
       fixed: getScoreFixed(sim.getState()),
@@ -124,9 +127,7 @@ describe("determinism over a 20-minute run", () => {
     // distance exactly would have to be a float, and would then disagree between
     // a browser and the P12 validation server.
     const sim = createSim(0x5c04e);
-    for (let i = 0; i < TWENTY_MINUTES; i += 1) {
-      sim.tick(idle());
-    }
+    driveEmpty(sim, TWENTY_MINUTES);
     const distance = Math.floor(sim.getState().f[F.distance] ?? 0);
     const bound = Math.ceil((TWENTY_MINUTES * 0.5) / SCALE);
     expect(Math.abs(score - distance)).toBeLessThanOrEqual(bound);
@@ -143,9 +144,7 @@ describe("determinism over a 20-minute run", () => {
     let b = 0;
     while (done < TWENTY_MINUTES) {
       const size = Math.min(batches[b % batches.length] ?? 1, TWENTY_MINUTES - done);
-      for (let i = 0; i < size; i += 1) {
-        sim.tick(idle());
-      }
+      driveEmpty(sim, size);
       done += size;
       b += 1;
     }
@@ -250,9 +249,7 @@ describe("guards", () => {
 
   it("a dead player stops scoring", () => {
     const sim = createSim(0xdead1);
-    for (let i = 0; i < 600; i += 1) {
-      sim.tick(idle());
-    }
+    driveEmpty(sim, 600);
     sim.getState().runStatus = RunStatus.Ended;
     const frozen = getScoreFixed(sim.getState());
 

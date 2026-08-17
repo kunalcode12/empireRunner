@@ -42,6 +42,7 @@ export {
   EntityType,
   Vertical,
   blocksVertical,
+  entityCentreX,
   entityDef,
   isObstacle,
   type EntityDef,

@@ -42,6 +42,8 @@ const RECYCLE_BEHIND = TUNING.render.tunnelRecycleBehind;
 
 const HALF = 0.5;
 const QUARTER_TURN = Math.PI / 2;
+/** Face 0 is the floor — the one surface that receives the player's shadow. */
+const FLOOR_FACE = 0;
 
 /**
  * One face's placement within the prism cross-section.
@@ -100,15 +102,36 @@ export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
     return plane;
   }, []);
 
+  /**
+   * Floor is lit; the three walls are flat.
+   *
+   * ## Why the walls are unlit, decided from a captured frame
+   *
+   * With Lambert on every face, gunmetal #2b2b2f on a VERTICAL surface rendered
+   * at roughly #101010 — a wall normal catches almost nothing from an overhead
+   * key, and raising the hemisphere fill barely moved it because the albedo is
+   * genuinely that dark. The tunnel walls read as black, which is both the
+   * GAME_BIBLE §11.3 ban ("backgrounds darker than the darkest colour in the
+   * active theme's palette") and a legibility problem: the prism stopped reading
+   * as a four-sided space at all.
+   *
+   * `MeshBasicMaterial` renders the palette colour exactly, with no shading
+   * term, so a wall can never be darker than the swatch it was given. That is
+   * also §11.1 verbatim — "every surface is one flat colour", "no gradient
+   * ramps" — so the unlit path is the art direction rather than a workaround.
+   *
+   * The FLOOR stays Lambert for one reason: `MeshBasicMaterial` cannot receive
+   * shadows, and the player's contact shadow is the only depth cue the grey-box
+   * has. Ash is light enough that shading it does not crush.
+   */
   const materials = useMemo(
     () =>
-      FACE_COLORS.map(
-        (color) =>
-          new THREE.MeshLambertMaterial({
-            color: new THREE.Color(color),
-            side: THREE.FrontSide,
-          }),
-      ),
+      FACE_COLORS.map((color, face) => {
+        const common = { color: new THREE.Color(color), side: THREE.FrontSide };
+        return face === FLOOR_FACE
+          ? new THREE.MeshLambertMaterial(common)
+          : new THREE.MeshBasicMaterial(common);
+      }),
     [],
   );
 

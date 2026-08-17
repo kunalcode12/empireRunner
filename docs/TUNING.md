@@ -319,6 +319,82 @@ Not gameplay, but they change how the game *feels*, so they live here.
 
 ---
 
+## 13b. Character animation — P09-feel
+
+The runner is built from primitives and animated procedurally. There is no rigged
+model in the repo and none is referenced.
+
+| Key | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `strideLength` | u | **2.05** | 1.5 – 3.0 | ⚙️ | **Why the feet never skate.** The run cycle's phase is `distance / strideLength`, not a time-driven rate multiplied by speed. One stride always covers one stride of ground, by construction, at any speed from 12 to 34 u/s. |
+| `runSwing` | rad | **0.85** | 0.4 – 1.2 | ⚙️ | Hip and shoulder amplitude. Too low reads as a shuffle; too high as a cartoon sprint. |
+| `runBob` | u | **0.075** | 0 – 0.2 | ⚙️ | Two bounces per stride — one per push-off. |
+| `leanIntoLane` | rad | **0.34** | 0 – 0.7 | ⚙️ | Banks INTO the turn, like a motorcycle. Banking away is the instinct and it is wrong. |
+| `rollCounterRotation` | rad | **0.55** | 0 – 1.0 | ⚙️ | Torso twists AGAINST the world's rotation during a roll. Without it the runner is static in their own frame for 0.3s — the most dramatic move in the game with no character response. |
+| `headTrackMax` | rad | **0.6** | 0 – 1.0 | ⚙️ | Head turns toward the nearest fatal obstacle ahead. A free telegraph, and the cheapest "this character is alive" signal there is. |
+| `blendRunToJump` | s | **0.06** | — | ⚙️ | **Cross-fades are per PAIR.** A launch must be instant. |
+| `blendJumpToFall` | s | **0.12** | — | ⚙️ | The apex hang — the one moment the arc should float. |
+| `blendLandToRun` | s | **0.10** | — | ⚙️ | A settle, not a snap. |
+| `blendToSlide` / `blendToCrash` | s | **0.05 / 0.03** | — | ⚙️ | A slide is a commitment; an impact is the readable moment. |
+
+One global blend time is the most common animation mistake: pick 0.09 for all of
+these and the jump feels sluggish while the crash feels mushy. There is no single
+number that serves both.
+
+---
+
+## 13c. Impact feel — P09-feel
+
+Everything here is presentation. Nothing may change a gameplay outcome.
+
+| Key | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `hitStopCrash` | s | **0.09** | 0.05 – 0.12 | ⚙️ | **Frozen render time. The sim keeps ticking.** Freezing the sim would hand the player free time, break input, and make the run unreplayable server-side — law (a). Below ~50ms nobody perceives it; above ~120ms it reads as a hitch. Does more for impact than any particle system. |
+| `hitStopShatter` | s | **0.06** | 0.04 – 0.09 | ⚙️ | Shorter: it repeats during Overdrive and must not stack into a stutter. |
+| `hitStopMax` | s | **0.12** | — | 🔒 | Cap. A burst of shatters in one frame freezes once, hard, rather than once per obstacle. |
+| `traumaCrash` / `Stumble` / `NearMiss` | — | **1.0 / 0.42 / 0.16** | 0 – 1 | ⚙️ | Trauma accumulates and clamps at 1. The offset is driven by **trauma²**, so small events are near-silent and a real crash is dramatic. |
+| `traumaDecay` | /s | **1.7** | 0.8 – 3.0 | ⚙️ | Linear decay; the square makes the visible tail fast. |
+| `shakeMaxOffset` | u | **0.34** | 0 – 0.8 | ⚙️ | Offset comes from **gradient noise, never a sine.** A sine is periodic, the eye locks onto the rhythm, and it reads as a wobble rather than an impact. Asserted in `tests/render/feel.test.ts`. |
+| `squashMax` | × | **0.32** | 0 – 0.5 | ⚙️ | Landing compression, **scaled by impact velocity**. A fixed squash on every landing stops carrying information and becomes a tic. Volume-preserving: horizontal scale is `1/√vertical`. |
+| `speedLineOnsetSpeed` | u/s | **17.0** | 12 – 25 | ⚙️ | Speed lines are **invisible at base speed** — a signal that is always on is not a signal. In effect they are a readout of the Flow coupling: the screen gets aggressive because the player is playing well. |
+| `nearMissPulseStrength` | × | **0.65** | 0 – 1 | ⚙️ | Transient chromatic aberration. GAME_BIBLE §11.3 permits aberration **only** as a transient — this is one, and it is zero the rest of the time. |
+
+---
+
+## 13d. Particles — P09-feel
+
+One pooled system, instanced quads, **one draw call** regardless of live count.
+
+| Key | Unit | Default | Notes |
+|---|---|---|---|
+| `maxHigh` / `maxMedium` / `maxLow` | count | **1024 / 512 / 0** | The pool is always allocated at the HIGH size; the tier caps how much is *used*, so switching tier never reallocates. |
+| `dustPerStep` | count | **3** | Emitted from the rig's own stride phase, so a puff lands exactly when a foot does at any speed. |
+| `coinBurst` · `shatterBurst` | count | **10 · 22** | |
+| `trailPerSecond` | /s | **55** | Rate-based, not per-frame, so the trail is the same density at 60 and 144fps. |
+
+**`Math.random` is correct here.** The sim bans it because replays must
+re-simulate identically; particles are never read back and are not in the replay.
+Using the sim's seeded RNG would be actively wrong — it would advance the
+generator stream, so spawning a dust puff would change the track layout.
+
+---
+
+## 13e. Reduced motion — P09-feel
+
+| Disabled | Kept |
+|---|---|
+| Screen shake, aberration pulses, speed lines | **Hit-stop** — a pause, not motion, and the clearest non-auditory hit signal |
+| Camera roll lean and overshoot | **The roll itself** — the world rotating IS the game (§3.2) |
+| Landing squash and stretch | The landing, and its dust |
+| — | **FOV ramp at 40%** — the main speed cue; removing it leaves the player unable to judge approach |
+| — | Particles at 50%, head tracking at 50% (it points at the hazard, so it is information) |
+
+Sources are the OS `prefers-reduced-motion` and an explicit setting, with the
+explicit one winning **in both directions**. `?motion=reduced` forces it for
+testing.
+
+---
+
 ## 14. Enforced budgets
 
 These are **tests, not aspirations.** They live in CI from P01 and fail the build.

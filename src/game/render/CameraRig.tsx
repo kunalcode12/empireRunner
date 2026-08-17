@@ -52,6 +52,8 @@ import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
 import { damp, lerpAngle, saturate } from "./interpolate";
+import { effectiveFovBoost, getMotion } from "./feel/reducedMotion";
+import type { ShakeOffset } from "./feel/trauma";
 
 const DISTANCE = TUNING.camera.cameraDistance;
 const HEIGHT = TUNING.camera.cameraHeight;
@@ -85,6 +87,7 @@ export interface CameraRigHandle {
    * @param speed    u/s — interpolated world speed, for FOV.
    * @param laneBias -1..1 — lane input direction, for look-ahead.
    * @param dt       s — real frame delta.
+   * @param shake    trauma offset for this frame, already reduced-motion gated.
    */
   update(
     x: number,
@@ -94,6 +97,7 @@ export interface CameraRigHandle {
     speed: number,
     laneBias: number,
     dt: number,
+    shake?: ShakeOffset,
   ): void;
   /** Current FOV. Diagnostic and test hook. */
   readonly fov: number;
@@ -136,7 +140,7 @@ export function CameraRig({ handleRef }: CameraRigProps): null {
         return scratch.fov;
       },
 
-      update(x, y, roll, face, speed, laneBias, dt): void {
+      update(x, y, roll, face, speed, laneBias, dt, shake): void {
         if (!(camera instanceof THREE.PerspectiveCamera)) {
           return;
         }
@@ -157,7 +161,11 @@ export function CameraRig({ handleRef }: CameraRigProps): null {
         scratch.lastRoll = roll;
         const angularVelocity = dt > 0 ? rollDelta / dt : 0;
 
-        const leanTarget = Math.tanh(angularVelocity) * ROLL_LEAN * DEG_TO_RAD;
+        // Reduced motion drops the decorative lean and keeps the roll. The world
+        // rotating IS the game (GAME_BIBLE §3.2); the camera's overshoot on top of
+        // it is the part that adds vestibular conflict without adding information.
+        const leanTarget =
+          Math.tanh(angularVelocity) * ROLL_LEAN * DEG_TO_RAD * getMotion().rollLeanScale;
         scratch.lean = damp(scratch.lean, leanTarget, ROLL_SETTLE, dt);
 
         // The camera's own roll lags the world's, then adds the lean on top.
@@ -165,7 +173,7 @@ export function CameraRig({ handleRef }: CameraRigProps): null {
 
         // ── 2. FOV from speed ───────────────────────────────────────────────
         const speedT = saturate((speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED));
-        scratch.fov = FOV_BASE + FOV_BOOST * speedT;
+        scratch.fov = FOV_BASE + effectiveFovBoost() * speedT;
         if (camera.fov !== scratch.fov) {
           camera.fov = scratch.fov;
           camera.updateProjectionMatrix();
@@ -190,12 +198,19 @@ export function CameraRig({ handleRef }: CameraRigProps): null {
         );
         scratch.target.applyQuaternion(faceQuat);
 
+        if (shake !== undefined) {
+          scratch.position.x += shake.x;
+          scratch.position.y += shake.y;
+        }
         camera.position.copy(scratch.position);
 
         // `up` carries the world roll plus the lean. Rotating up rather than the
         // camera itself keeps `lookAt` doing the work and avoids composing two
         // rotations that can disagree.
-        scratch.up.set(0, 1, 0).applyAxisAngle(scratch.axis, -scratch.roll - scratch.lean);
+        const shakeRoll = shake === undefined ? 0 : shake.roll;
+        scratch.up
+          .set(0, 1, 0)
+          .applyAxisAngle(scratch.axis, -scratch.roll - scratch.lean - shakeRoll);
         camera.up.copy(scratch.up);
         camera.lookAt(scratch.target);
       },

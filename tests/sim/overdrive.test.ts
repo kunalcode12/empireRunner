@@ -14,6 +14,8 @@ import {
 } from "@/game/sim/scoring/overdrive";
 import { getScore, scoreMultiplier } from "@/game/sim/scoring/score";
 import { stepScoring } from "@/game/sim/scoring";
+import { EntityType } from "@/game/sim/level/entities";
+import { driveEmpty } from "../helpers/drive";
 import { startRoll } from "@/game/sim/player/locomotion";
 
 const DT = TUNING.sim.fixedDelta;
@@ -138,9 +140,7 @@ describe("the full lifecycle", () => {
   it("the comedown is a landing, not a cliff", () => {
     const sim = primed(0xd2);
     sim.tick(idle(true));
-    for (let i = 0; i < TICK_RATE * 7; i += 1) {
-      sim.tick(idle());
-    }
+    driveEmpty(sim, TICK_RATE * 7);
     // Non-zero on exit is the whole point: using the mechanic must not read as
     // a punishment. It will have decayed a little since, but not to nothing.
     expect(sim.getState().f[F.flow]).toBeGreaterThan(0);
@@ -189,7 +189,7 @@ describe("the full lifecycle", () => {
     drain();
     const ticks = Math.round(DURATION / DT);
     for (let i = 0; i < ticks + 10; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
       drain();
     }
 
@@ -305,9 +305,9 @@ describe("BALANCE FINDING — Overdrive loses money early in a run", () => {
     const flowOnly = createSim(0xd4);
     const TICKS = Math.round(DURATION / DT);
     for (let i = 1; i < TICKS; i += 1) {
-      od.tick(idle());
+      driveEmpty(od, 1);
       flowOnly.getState().f[F.flow] = FLOW_MAX;
-      flowOnly.tick(idle());
+      driveEmpty(flowOnly, 1);
     }
 
     const overdriveScore = getScore(od.getState());
@@ -321,10 +321,8 @@ describe("BALANCE FINDING — Overdrive loses money early in a run", () => {
 
     const od = createSim(0xd7);
     const flowOnly = createSim(0xd7);
-    for (let i = 0; i < WARMUP; i += 1) {
-      od.tick(idle());
-      flowOnly.tick(idle());
-    }
+    driveEmpty(od, WARMUP);
+    driveEmpty(flowOnly, WARMUP);
 
     // Both start the comparison from the same score and the same time curve.
     od.getState().f[F.scoreFixed] = 0;
@@ -333,9 +331,9 @@ describe("BALANCE FINDING — Overdrive loses money early in a run", () => {
     od.tick(idle(true));
 
     for (let i = 1; i < Math.round(DURATION / DT); i += 1) {
-      od.tick(idle());
+      driveEmpty(od, 1);
       flowOnly.getState().f[F.flow] = FLOW_MAX;
-      flowOnly.tick(idle());
+      driveEmpty(flowOnly, 1);
     }
 
     expect(getScore(od.getState())).toBeGreaterThan(getScore(flowOnly.getState()));
@@ -352,7 +350,7 @@ describe("invulnerability and shatter", () => {
     startOverdrive(state, events);
 
     // Kind 0 is Fatal under the placeholder classifier.
-    const index = addObstacle(state, 0, state.player.face, state.player.lane, 0);
+    const index = addObstacle(state, EntityType.Stack, state.player.face, state.player.lane, 0);
     stepCollision(state, DT, events);
 
     expect(state.runStatus).toBe(RunStatus.Running);
@@ -369,7 +367,7 @@ describe("invulnerability and shatter", () => {
     state.f[F.worldSpeed] = TUNING.speed.baseSpeed;
     const events = createEventRing();
 
-    addObstacle(state, 0, state.player.face, state.player.lane, 0);
+    addObstacle(state, EntityType.Stack, state.player.face, state.player.lane, 0);
     stepCollision(state, DT, events);
 
     expect(state.player.phase).toBe(Phase.Crashed);
@@ -386,7 +384,7 @@ describe("invulnerability and shatter", () => {
 
     const before = getScore(state);
     const cursor = events.head;
-    addObstacle(state, 0, state.player.face, state.player.lane, 0);
+    addObstacle(state, EntityType.Stack, state.player.face, state.player.lane, 0);
     stepCollision(state, DT, events);
 
     // Drive the scoring pass over just those events.
@@ -408,8 +406,8 @@ describe("Overdrive does NOT touch world speed", () => {
     plain.tick(idle());
 
     for (let i = 1; i < Math.round(DURATION / DT); i += 1) {
-      od.tick(idle());
-      plain.tick(idle());
+      driveEmpty(od, 1);
+      driveEmpty(plain, 1);
       expect(od.getState().f[F.worldSpeed]).toBeCloseTo(plain.getState().f[F.worldSpeed] ?? 0, 10);
     }
   });
@@ -418,7 +416,7 @@ describe("Overdrive does NOT touch world speed", () => {
     const sim = primed(0xd6);
     sim.tick(idle(true));
     for (let i = 0; i < TICK_RATE * 30; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
       expect(sim.getState().f[F.worldSpeed] ?? 0).toBeLessThanOrEqual(TUNING.speed.maxSpeed);
     }
   });

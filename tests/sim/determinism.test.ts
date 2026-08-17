@@ -6,6 +6,7 @@ import { createRng, nextInt } from "@/game/sim/rng";
 import { formatHash } from "@/game/sim/hash";
 import { F, getF, RunStatus } from "@/game/sim/state";
 import { getScore } from "@/game/sim/scoring/score";
+import { driveAlive, driveEmpty } from "../helpers/drive";
 
 /**
  * Law (a) — docs/ARCHITECTURE.md §2a.
@@ -264,9 +265,10 @@ describe("law (b): the player stays near the origin", () => {
     const sim = createSim(RUN_SEED);
     const idle = createIntent();
 
-    for (let i = 0; i < TWENTY_MINUTES_TICKS; i += 1) {
-      sim.tick(idle);
-    }
+    // Kept alive: with the generator live an idle player dies in under a
+    // minute, and this test is about float precision over a long run, not about
+    // how long an idle player survives.
+    driveAlive(sim, TWENTY_MINUTES_TICKS, { intent: idle });
 
     const state = sim.getState();
     expect(Math.abs(getF(state, F.playerZ))).toBeLessThan(50);
@@ -281,9 +283,7 @@ describe("the world-speed curve", () => {
     expect(getF(sim.getState(), F.worldSpeed)).toBeCloseTo(TUNING.speed.baseSpeed, 6);
 
     const idle = createIntent();
-    for (let i = 0; i < TUNING.sim.tickRate * 1200; i += 1) {
-      sim.tick(idle);
-    }
+    driveAlive(sim, TUNING.sim.tickRate * 1200, { intent: idle });
 
     const speed = getF(sim.getState(), F.timeSpeed);
     expect(speed).toBeGreaterThan(27.9);
@@ -296,9 +296,9 @@ describe("the world-speed curve", () => {
     const CHECK_SECONDS = 300;
     const sim = createSim(RUN_SEED);
     const idle = createIntent();
-    for (let i = 0; i < TUNING.sim.tickRate * CHECK_SECONDS; i += 1) {
-      sim.tick(idle);
-    }
+    // driveEmpty rather than driveAlive: the closed form is a property of the
+    // speed curve alone, and a stumble would scale worldSpeed and muddy it.
+    driveEmpty(sim, TUNING.sim.tickRate * CHECK_SECONDS, idle);
 
     const { baseSpeed, speedCeiling, speedTau } = TUNING.speed;
     const closedForm =
@@ -311,7 +311,7 @@ describe("the world-speed curve", () => {
     const sim = createSim(RUN_SEED);
     const idle = createIntent();
     for (let i = 0; i < TUNING.sim.tickRate * 600; i += 1) {
-      sim.tick(idle);
+      driveAlive(sim, 1, { intent: idle });
       expect(getF(sim.getState(), F.worldSpeed)).toBeLessThanOrEqual(TUNING.speed.maxSpeed);
     }
   });

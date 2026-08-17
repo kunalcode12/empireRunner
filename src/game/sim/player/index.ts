@@ -412,6 +412,16 @@ export function applyFatal(
   obstacleIndex = -1,
 ): void {
   const player = state.player;
+
+  // Idempotent. A second fatal hit on an already-dead player is not a state
+  // machine violation, it is a caller that did not check — and the dev-mode
+  // guard would throw on `CRASHED --FatalHit-->` while prod silently ignored it,
+  // which is exactly the dev/prod divergence the guard is not supposed to cause.
+  // Returning early keeps both builds doing the same thing.
+  if (isTerminalPhase(player.phase) || state.runStatus === RunStatus.Ended) {
+    return;
+  }
+
   player.phase = tryTransition(player.phase, Edge.FatalHit);
 
   if (tryArmFracture(state, obstacleIndex, events)) {

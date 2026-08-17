@@ -12,16 +12,16 @@
  * frame. A ref that the loop writes into costs nothing and React never sees it.
  */
 
-import { useCallback, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { TUNING } from "@/game/config/tuning";
-import type { Sim } from "@/game/sim/sim";
 import { CameraRig, type CameraRigHandle } from "./CameraRig";
 import { EntityRenderer, type EntityRendererHandle } from "./EntityRenderer";
 import { LightingRig, type LightingRigHandle } from "./LightingRig";
-import { PlayerRig, type PlayerRigHandle } from "./PlayerRig";
+import { RunnerRig, type RunnerRigHandle } from "./animation/RunnerRig";
+import { ParticleSystem, type ParticleSystemHandle } from "./vfx/ParticleSystem";
+import { SpeedLines, type SpeedLinesHandle } from "./feel/SpeedLines";
 import { Tunnel, type TunnelHandle } from "./Tunnel";
 import { BACKGROUND_COLOR } from "./palette";
-import { seedSim } from "./devSeed";
 import { useGameLoop } from "./useGameLoop";
 import { DrawCallGuard, PerfMonitor } from "./perf/PerfMonitor";
 import type { EventListener } from "./events";
@@ -30,37 +30,23 @@ export interface SceneProps {
   seed: number;
   onEvent?: EventListener;
   paused?: boolean;
-  /** Populate the tunnel with real authored chunks. Dev only; see devSeed.ts. */
-  seedWorld?: boolean;
 }
 
-export function Scene({
-  seed,
-  onEvent,
-  paused = false,
-  seedWorld = true,
-}: SceneProps): React.ReactElement {
+export function Scene({ seed, onEvent, paused = false }: SceneProps): React.ReactElement {
   const tunnel = useRef<TunnelHandle | null>(null);
   const entities = useRef<EntityRendererHandle | null>(null);
-  const player = useRef<PlayerRigHandle | null>(null);
+  const player = useRef<RunnerRigHandle | null>(null);
   const camera = useRef<CameraRigHandle | null>(null);
   const lighting = useRef<LightingRigHandle | null>(null);
+  const particles = useRef<ParticleSystemHandle | null>(null);
+  const speedLines = useRef<SpeedLinesHandle | null>(null);
 
   const refs = useMemo(
-    () => ({ tunnel, entities, player, camera, lighting }),
-    [tunnel, entities, player, camera, lighting],
+    () => ({ tunnel, entities, player, camera, lighting, particles, speedLines }),
+    [tunnel, entities, player, camera, lighting, particles, speedLines],
   );
 
-  const seedFn = useCallback(
-    (sim: Sim) => {
-      if (seedWorld) {
-        seedSim(sim);
-      }
-    },
-    [seedWorld],
-  );
-
-  useGameLoop(refs, { seed, onEvent, paused, seedWorld: seedFn });
+  useGameLoop(refs, { seed, onEvent, paused });
 
   return (
     <>
@@ -73,9 +59,11 @@ export function Scene({
 
       <Tunnel handleRef={tunnel} />
       <EntityRenderer handleRef={entities} />
-      <PlayerRig handleRef={player} />
+      <RunnerRig handleRef={player} />
       <CameraRig handleRef={camera} />
       <LightingRig handleRef={lighting} />
+      <ParticleSystem handleRef={particles} />
+      <SpeedLines handleRef={speedLines} />
       <DrawCallGuard />
       <PerfMonitor />
     </>

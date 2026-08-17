@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TUNING } from "@/game/config/tuning";
 import { createSim } from "@/game/sim/sim";
+import { driveEmpty } from "../helpers/drive";
 import { F, Phase } from "@/game/sim/state";
 import { applyStumble } from "@/game/sim/player";
 import { closedFormSpeed, flowSpeedBonus } from "@/game/sim/scoring/difficulty";
@@ -28,7 +29,7 @@ describe("the exponential approach", () => {
     const sim = createSim(2);
     let previous: number = BASE;
     for (let i = 0; i < TICK_RATE * 120; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
       const speed = sim.getState().f[F.timeSpeed] ?? 0;
       expect(speed).toBeGreaterThan(previous);
       // No tick may move the speed by more than a hair; a step function here
@@ -43,7 +44,7 @@ describe("the exponential approach", () => {
     // An hour. The game must stay theoretically playable forever, which means
     // the curve converges rather than diverging.
     for (let i = 0; i < TICK_RATE * 3600; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
     }
     const speed = sim.getState().f[F.timeSpeed] ?? 0;
     expect(speed).toBeLessThan(CEILING);
@@ -53,7 +54,7 @@ describe("the exponential approach", () => {
   it("reaches ~63% of the way to the ceiling after one tau", () => {
     const sim = createSim(4);
     for (let i = 0; i < Math.round(TUNING.speed.speedTau / DT); i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
     }
     const speed = sim.getState().f[F.timeSpeed] ?? 0;
     const fraction = (speed - BASE) / (CEILING - BASE);
@@ -79,7 +80,7 @@ describe("the incremental integration matches the closed form", () => {
 
     for (const seconds of CHECKS) {
       while (elapsed < seconds) {
-        sim.tick(idle());
+        driveEmpty(sim, 1);
         elapsed += DT;
       }
       const incremental = sim.getState().f[F.timeSpeed] ?? 0;
@@ -92,7 +93,7 @@ describe("the incremental integration matches the closed form", () => {
     const sim = createSim(6);
     const TICKS = TICK_RATE * 60 * 20;
     for (let i = 0; i < TICKS; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
     }
     const incremental = sim.getState().f[F.timeSpeed] ?? 0;
     const analytic = closedFormSpeed(TICKS * DT);
@@ -119,7 +120,7 @@ describe("the Flow bonus", () => {
 
     const sim = createSim(7);
     for (let i = 0; i < TICK_RATE * 3600; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
     }
     expect(sim.getState().f[F.worldSpeed] ?? 0).toBeLessThan(MAX);
   });
@@ -140,7 +141,7 @@ describe("the Flow / speed coupling raises real difficulty", () => {
       let ticks = 0;
       while ((sim.getState().f[F.distance] ?? 0) < TARGET_DISTANCE) {
         sim.getState().f[F.flow] = flow;
-        sim.tick(idle());
+        driveEmpty(sim, 1);
         ticks += 1;
       }
       return { speed: sim.getState().f[F.worldSpeed] ?? 0, seconds: ticks * DT };
@@ -170,7 +171,7 @@ describe("the Flow / speed coupling raises real difficulty", () => {
       const sim = createSim(0xe5);
       while ((sim.getState().f[F.distance] ?? 0) < TARGET_DISTANCE) {
         sim.getState().f[F.flow] = flow;
-        sim.tick(idle());
+        driveEmpty(sim, 1);
       }
       return sim.getState().f[F.scoreFixed] ?? 0;
     }
@@ -188,7 +189,7 @@ describe("the stumble penalty", () => {
   it("slows the world below the unstumbled speed", () => {
     const sim = createSim(8);
     for (let i = 0; i < 300; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
     }
     const before = sim.getState().f[F.worldSpeed] ?? 0;
 
@@ -211,7 +212,7 @@ describe("difficulty bands", () => {
     const sim = createSim(9);
     const bands = new Set<number>();
     for (let i = 0; i < TICK_RATE * 300; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
       bands.add(sim.getState().band);
     }
     expect(bands.size).toBeGreaterThan(1);
@@ -221,7 +222,7 @@ describe("difficulty bands", () => {
     const sim = createSim(10);
     let previous = 0;
     for (let i = 0; i < TICK_RATE * 300; i += 1) {
-      sim.tick(idle());
+      driveEmpty(sim, 1);
       expect(sim.getState().band).toBeGreaterThanOrEqual(previous);
       previous = sim.getState().band;
     }

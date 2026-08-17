@@ -271,7 +271,7 @@ Every law above has a test. Laws without tests decay.
 | (a) determinism | Same seed + log run 100x → identical `SimState` hash | ✅ P02 |
 | (a) no react/three in `sim/` | ESLint `no-restricted-imports` boundary | ✅ P01 |
 | (a) no `Math.random` in `sim/` | ESLint `no-restricted-properties` | ✅ P01 |
-| (a) **no transcendentals in `sim/`** | ⚠️ **NOT ENFORCED.** `Math.exp/log/pow/sin/cos` are only "implementation-approximated" by ECMA-262, so they differ between engines and break client-vs-server replay validation. Currently held by convention plus the frozen constant in `TUNING.determinism`. An ESLint `no-restricted-properties` rule was proposed and not approved; add before P04. | ❌ |
+| (a) **no transcendentals in `sim/`** | ESLint `no-restricted-properties` bans 19 `Math.*` functions under `src/game/sim/**`. They are only "implementation-approximated" by ECMA-262, so engines differ in the last ulp and client-vs-server replay validation breaks. Where the sim needs one, it is evaluated offline and frozen as a decimal literal — see `TUNING.determinism.speedApproachPerTick`. **This row read "NOT ENFORCED" until P09-feel; the rule had in fact shipped at P01 and the table was simply wrong.** | ✅ P01 |
 | (b) player stays near origin | Assert `abs(player.z) < 50` across a 20-minute headless run | ✅ P02 |
 | (c) frame-rate independence | Same log at 30 / 60 / 144 Hz and batched → identical result | ✅ P02 |
 | (d) zero allocation | Retained ≈ 0 (needs `--expose-gc`); transient under ceiling; no growth over an hour | ✅ P02 |

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { TUNING } from "@/game/config/tuning";
 import { createSim } from "@/game/sim/sim";
-import { createIntent } from "@/game/sim/intent";
+import { createIntent, type Intent } from "@/game/sim/intent";
+import { F, RunStatus } from "@/game/sim/state";
 
 /**
  * Tick cost budget — docs/TUNING.md §14.
@@ -15,11 +16,22 @@ import { createIntent } from "@/game/sim/intent";
  * the output, not just asserted. A CI runner will be slower than a dev laptop;
  * the budget is set with that headroom in mind.
  *
- * Caveat worth stating: the player controller, generator, collision and scoring
- * are all P02 stubs. The current cost is the loop, the world-speed integration
- * and the per-tick snapshot copy — the last of which is real work that scales
- * with pool capacity and will NOT get cheaper. Treat these numbers as a floor,
- * not as a prediction of the finished sim.
+ * As of P07 these numbers cover the real thing: player controller, live
+ * generator, collision against real colliders, and scoring. They are no longer
+ * a floor measured against stubs.
+ *
+ * ## Keeping the run alive, and why the benchmark has to
+ *
+ * `sim.tick()` returns immediately once `runStatus` is `Ended`, so a benchmark
+ * driven by an idle intent stops measuring anything the moment the player dies —
+ * and with the generator live, an idle player dies inside a minute. Worse, a
+ * loop written as `while (state.tick < N)` never terminates, because `tick` stops
+ * advancing. That hung this suite the first time the generator was wired in.
+ *
+ * So `driveAlive` tops up invulnerability every tick and resets on any end it
+ * cannot prevent (a fall out of the world is not covered by invulnerability).
+ * That keeps the entity population at steady state, which is what these
+ * benchmarks are actually about — the cost of a tick with a full tunnel in it.
  */
 
 const BENCH_TICKS = TUNING.budgets.benchmarkTicks;
@@ -27,19 +39,33 @@ const BUDGET_MS = TUNING.budgets.benchmarkBudgetMs;
 const PER_TICK_BUDGET_MS = TUNING.budgets.simTickMs;
 const WARMUP_TICKS = 2000;
 const MICROSECONDS = 1000;
+/** s — topped up every tick, so the benchmark player cannot die of contact. */
+const IMMORTAL_INVULN = 999;
+
+/**
+ * Ticks `count` times, keeping the run alive.
+ *
+ * @returns ticks actually executed, which always equals `count`.
+ */
+function driveAlive(sim: ReturnType<typeof createSim>, intent: Intent, count: number): number {
+  for (let i = 0; i < count; i += 1) {
+    sim.getState().f[F.playerInvulnerableTimer] = IMMORTAL_INVULN;
+    if (sim.getState().runStatus === RunStatus.Ended) {
+      sim.reset(0xbeef);
+    }
+    sim.tick(intent);
+  }
+  return count;
+}
 
 function benchmark(ticks: number): number {
   const sim = createSim(0xbeef);
   const intent = createIntent();
 
-  for (let i = 0; i < WARMUP_TICKS; i += 1) {
-    sim.tick(intent);
-  }
+  driveAlive(sim, intent, WARMUP_TICKS);
 
   const start = performance.now();
-  for (let i = 0; i < ticks; i += 1) {
-    sim.tick(intent);
-  }
+  driveAlive(sim, intent, ticks);
   return performance.now() - start;
 }
 
@@ -91,25 +117,20 @@ describe("tick cost", () => {
     const intent = createIntent();
     const WINDOW = 20_000;
 
-    for (let i = 0; i < WARMUP_TICKS; i += 1) {
-      sim.tick(intent);
-    }
+    driveAlive(sim, intent, WARMUP_TICKS);
 
     const earlyStart = performance.now();
-    for (let i = 0; i < WINDOW; i += 1) {
-      sim.tick(intent);
-    }
+    driveAlive(sim, intent, WINDOW);
     const early = performance.now() - earlyStart;
 
-    // Push out to ~20 minutes of simulated time.
-    while (sim.getState().tick < TUNING.sim.tickRate * 60 * 20) {
-      sim.tick(intent);
-    }
+    // Push out to ~20 minutes of simulated time. Counted locally rather than
+    // read from `state.tick`, which stops advancing on a run end and used to
+    // turn this into an infinite loop.
+    const TWENTY_MINUTES = TUNING.sim.tickRate * 60 * 20;
+    driveAlive(sim, intent, Math.max(0, TWENTY_MINUTES - WARMUP_TICKS - WINDOW));
 
     const lateStart = performance.now();
-    for (let i = 0; i < WINDOW; i += 1) {
-      sim.tick(intent);
-    }
+    driveAlive(sim, intent, WINDOW);
     const late = performance.now() - lateStart;
 
     console.log(

@@ -37,6 +37,8 @@
  * AABBs agree. Until then, this is the single source of truth for the solver.
  */
 
+import { TUNING } from "@/game/config/tuning";
+
 /** What a player is doing vertically. The solver's third axis. */
 export const Vertical = {
   Standing: 0,
@@ -216,6 +218,27 @@ export const ENTITY_DEFS: Readonly<Record<number, EntityDef>> = Object.freeze({
 /** Looks up a definition. Unknown types are treated as inert rather than fatal. */
 export function entityDef(type: number): EntityDef {
   return ENTITY_DEFS[type] ?? def(type, "Unknown", 0, { fatal: false });
+}
+
+const LANE_WIDTH = TUNING.geometry.laneWidth;
+const HALF = 0.5;
+
+/**
+ * Lateral centre of an entity within its face, in world units.
+ *
+ * Multi-lane entities are anchored at their **leftmost** occupied lane
+ * (`ChunkEntity.lane`), so the box centre sits half a span to the right of it.
+ * Getting this wrong puts a three-lane wall a full lane off-centre, which
+ * presents as the player dying to thin air on one side and walking through
+ * geometry on the other.
+ *
+ * Evaluated once at spawn and stored in `EntityColumns.x`, not recomputed per
+ * tick per entity — collision reads the column.
+ */
+export function entityCentreX(lane: number, type: number): number {
+  const span = entityDef(type).laneSpan;
+  const leftEdge = (lane - (LANES_PER_FACE - 1) * HALF) * LANE_WIDTH;
+  return leftEdge + (span - 1) * LANE_WIDTH * HALF;
 }
 
 /** True when this entity stops a player in the given vertical state. */
