@@ -75,6 +75,7 @@ import { createFeel, handleFeelEvent, resetFeel, stepFeel, type FeelState } from
 import { emitFootDust, emitOverdriveTrail } from "./vfx/emitters";
 import { nearestHazardX } from "./animation/procedural";
 import { F } from "@/game/sim/state";
+import { createAudioDirector, type AudioDirector } from "@/game/audio";
 
 /** Everything the loop drives. All refs; all mutated, never re-rendered. */
 export interface GameLoopRefs {
@@ -104,6 +105,15 @@ interface Engine {
   view: ReturnType<typeof createRenderView>;
   frames: number;
   input: InputManager | null;
+  /**
+   * The audio layer.
+   *
+   * Built here beside the input manager because both need the DOM and both are
+   * per-run. It receives every drained event and one telemetry push per frame,
+   * and it can never write back — `AudioDirector` exposes no path into the sim,
+   * which is what keeps an audio hitch from changing a run's outcome.
+   */
+  audio: AudioDirector;
   feel: FeelState;
   /** Reused; where effects spawn. Written each frame before the drain. */
   feelContext: { playerX: number; playerY: number; playerZ: number; landingSpeed: number };
@@ -174,6 +184,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       view: createRenderView(),
       frames: 0,
       input: manager,
+      audio: createAudioDirector(),
       feel: createFeel(),
       feelContext: { playerX: 0, playerY: 0, playerZ: 0, landingSpeed: 0 },
       worldPos: { x: 0, y: 0, z: 0 },
@@ -188,6 +199,9 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       if (pool !== undefined) {
         handleFeelEvent(engine.feel, event, pool, engine.feelContext);
       }
+      // Audio before the external listener, for the same reason feel is: it is
+      // a first-class consumer of the ring, not an observer of one.
+      engine.audio.handleEvent(event);
       listenerRef.current?.(event);
     });
 
@@ -198,6 +212,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     return () => {
       unsubscribe();
       manager.dispose();
+      engine.audio.dispose();
       engineRef.current = null;
     };
   }, [seed]);
@@ -276,6 +291,14 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     engine.feelContext.playerY = world.y;
     engine.feelContext.playerZ = world.z;
     engine.drain.drain(sim.events);
+
+    // 4b. Audio telemetry.
+    //
+    //     Pushed BEFORE the hit-stop return below, deliberately. Hit-stop
+    //     freezes the picture, not the game — and certainly not the music. A
+    //     90ms hole in the audio would read as a dropped buffer, which is the
+    //     opposite of the weight the freeze is trying to add.
+    engine.audio.setTelemetry(view.worldSpeed, view.flow);
 
     // 5. Feel. Decays trauma and the aberration pulse, and reports whether the
     //    picture is frozen this frame.

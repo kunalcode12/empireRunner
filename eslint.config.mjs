@@ -299,6 +299,11 @@ export default defineConfig([
       // lean, blend times) live in TUNING.animation, not here.
       "src/game/render/animation/clips.ts",
       "src/game/render/animation/rig.ts",
+      // Sound design. Same case again: a kick's 118Hz start pitch is one
+      // character of that sound's spelling, not a tunable that belongs next to
+      // jump gravity. Values that affect the mix ACROSS sounds — bus gains,
+      // jitter ranges, duck depth, the tempo grid — live in TUNING.audio.
+      "src/game/audio/recipes.ts",
     ],
     rules: {
       "no-magic-numbers": [

@@ -65,6 +65,21 @@ export interface PlacedChunk {
   startDistance: number;
   /** Sequence number since the run started. Never reused. */
   ordinal: number;
+  /**
+   * 0..3 — which theme this chunk belongs to. GAME_BIBLE §10.
+   *
+   * Equal to the number of milestones already crossed, which is exactly the
+   * theme ordinal: 0 Kiln, 1 Undertow, 2 Bazaar, 3 Static.
+   */
+  themeIndex: number;
+  /**
+   * True on the FIRST transition chunk of a boundary, and only that one.
+   *
+   * A boundary is `TRANSITION_CHUNK_COUNT` chunks long, so a caller testing
+   * `chunk.id === "transition"` sees five consecutive chunks and would fire five
+   * theme changes for one transition. This flag is the edge, not the level.
+   */
+  themeChanged: boolean;
 }
 
 export interface LevelState {
@@ -117,6 +132,8 @@ export function createLevelState(): LevelState {
       chunk: TRANSITION_CHUNK,
       startDistance: 0,
       ordinal: 0,
+      themeIndex: 0,
+      themeChanged: false,
     });
   }
   return {
@@ -311,8 +328,19 @@ function selectChunk(state: LevelState, rng: RngState, tier: number): number {
   return pickWeighted(rng, count);
 }
 
-/** Writes a chunk into the ring, recycling the oldest slot when full. */
-function place(state: LevelState, chunkIndex: number, chunk: Chunk): PlacedChunk {
+/**
+ * Writes a chunk into the ring, recycling the oldest slot when full.
+ *
+ * `themeChanged` is passed in rather than derived here because only the caller
+ * knows whether this particular transition chunk is the one that opened the
+ * boundary.
+ */
+function place(
+  state: LevelState,
+  chunkIndex: number,
+  chunk: Chunk,
+  themeChanged = false,
+): PlacedChunk {
   const slotIndex =
     state.count < WINDOW_CHUNKS ? (state.head + state.count) % WINDOW_CHUNKS : state.head;
 
@@ -325,6 +353,11 @@ function place(state: LevelState, chunkIndex: number, chunk: Chunk): PlacedChunk
   slot.chunk = chunk;
   slot.startDistance = state.nextDistance;
   slot.ordinal = state.ordinal;
+  // Milestones crossed so far IS the theme ordinal. Read after `nextMilestone`
+  // has been advanced by the caller, so the transition chunks belong to the
+  // theme they lead INTO — which is what a cross-fade wants to fade towards.
+  slot.themeIndex = state.nextMilestone;
+  slot.themeChanged = themeChanged;
 
   if (state.count < WINDOW_CHUNKS) {
     state.count += 1;
@@ -376,7 +409,7 @@ export function generateNext(state: LevelState, rng: RngState, flow: number): Pl
   if (crossesMilestone(state)) {
     state.nextMilestone += 1;
     state.transitionRemaining = TRANSITION_CHUNK_COUNT - 1;
-    return place(state, TRANSITION_INDEX, TRANSITION_CHUNK);
+    return place(state, TRANSITION_INDEX, TRANSITION_CHUNK, true);
   }
 
   const tier = difficultyFor(state.nextDistance, flow);

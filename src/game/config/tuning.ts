@@ -1143,6 +1143,154 @@ export const TUNING = {
   },
 
   // ───────────────────────────────────────────────────────────────────────────
+  // 15f. Audio — docs/TUNING.md §16
+  //
+  // Everything here is PRESENTATION. Audio reads the sim event ring and the
+  // interpolated state; it never writes either. An audio hitch must never change
+  // a run's outcome — docs/ARCHITECTURE.md §3.
+  //
+  // Times in this section are WALL-CLOCK seconds on the `AudioContext` clock,
+  // not sim seconds. That distinction is the whole reason audio schedules
+  // against `AudioContext.currentTime` rather than the tick counter: the sim
+  // clock is a fiction the audio hardware has never heard of.
+  // ───────────────────────────────────────────────────────────────────────────
+  audio: {
+    // ── Bus gains. Persisted; these are the defaults ────────────────────────
+    /** x — master output gain. Below 1.0 so the sum of a full mix plus a burst
+     *  of one-shots has headroom before the destination clips. */
+    masterGain: 0.9,
+    /** x — music bus default. Music sits UNDER gameplay: every sound that tells
+     *  the player something has to win against it. */
+    musicGain: 0.6,
+    /** x — sfx bus default. */
+    sfxGain: 0.85,
+    /** x — ui bus default. */
+    uiGain: 0.7,
+
+    // ── Voice pool ──────────────────────────────────────────────────────────
+    /** count — concurrent one-shot voices. Beyond roughly this many the ear
+     *  cannot separate them anyway, so the cap costs nothing audible and bounds
+     *  the graph size. Band-5 density plus a shatter burst peaks near 14. */
+    maxVoices: 24,
+    /** s — fade applied when a voice is STOLEN. A hard `stop()` on a sounding
+     *  buffer is a step discontinuity, which is exactly what a click is. Six
+     *  milliseconds is inaudible as a fade and completely removes the click. */
+    voiceStealFade: 0.006,
+
+    // ── The musical grid ────────────────────────────────────────────────────
+    //
+    // One tempo for the whole project. Every theme is written to it, so a theme
+    // cross-fade at a distance milestone lands on a beat instead of smearing
+    // across one — and so the Overdrive swap can be quantised against a single
+    // shared grid rather than four of them.
+    /** bpm — project tempo. Fast enough to carry a runner, slow enough that the
+     *  percussion layer is not a wash at Overdrive speed. */
+    musicBpm: 126,
+    /** count — beats per bar. */
+    beatsPerBar: 4,
+    /** count — bars per stem loop. Every stem buffer is exactly this long, which
+     *  is what makes them interchangeable and phase-locked. */
+    barsPerLoop: 4,
+    /** s — extra render time past the loop end, folded back onto the head so a
+     *  decay that crosses the loop point wraps instead of clicking. */
+    stemTailSeconds: 1.5,
+
+    // ── Adaptive layering ───────────────────────────────────────────────────
+    //
+    // Intensity is a blend of the two things the player is actually feeling:
+    // how fast the world is moving, and how close they are to Overdrive.
+    /** x — weight of normalised world speed in the intensity blend. */
+    musicSpeedWeight: 0.45,
+    /** x — weight of normalised Flow in the intensity blend. Slightly higher:
+     *  Flow is the thing the player is playing FOR. */
+    musicFlowWeight: 0.55,
+    /** x — intensity at which percussion starts to come in. */
+    percussionOnset: 0.18,
+    /** x — intensity at which percussion is fully up. */
+    percussionFull: 0.45,
+    /** x — intensity at which the tension layer starts. */
+    tensionOnset: 0.5,
+    /** x — intensity at which the tension layer is fully up. */
+    tensionFull: 0.9,
+    /** s — how long a layer takes to fade in or out. Long: a layer that snaps in
+     *  reads as a bug, and the whole point of adaptive music is that the player
+     *  never catches it changing. */
+    layerFade: 0.9,
+    /** x — minimum change in a layer's target before it is re-scheduled. Without
+     *  this the frame loop would queue an automation event 60 times a second for
+     *  changes of 0.001, which costs real CPU and produces zipper artifacts. */
+    layerEpsilon: 0.02,
+    /** s — cross-fade between two themes' stem sets at a milestone. Slow, and
+     *  roughly the length of the 120m transition tunnel at mid-run speed. */
+    themeFade: 2.0,
+    /** s — cross-fade into and out of the Overdrive stem once the bar lands.
+     *  Short: the swap is meant to be felt as a cut. */
+    overdriveFade: 0.12,
+    /** x — how far the normal layers drop while the Overdrive stem is up. Not to
+     *  zero — the groove has to survive underneath or the exit feels like the
+     *  music restarted. */
+    overdriveLayerDuck: 0.75,
+
+    // ── Side-chain ducking ──────────────────────────────────────────────────
+    //
+    // Impacts have to cut through the music. The alternative — mixing music low
+    // enough that it never masks anything — makes the music pointless.
+    /** s — duck attack. 8ms is fast enough to clear the transient it is ducking
+     *  for and slow enough not to click. */
+    duckAttack: 0.008,
+    /** s — duck release, to 95% recovered. */
+    duckRelease: 0.18,
+    /** x — how far the music bus drops for a nominal one-shot. Scaled by the
+     *  sound's own loudness, so a coin dips far less than a crash. */
+    duckDepth: 0.3,
+    /** x — hard ceiling on the dip. Without it a shatter burst drives the music
+     *  bus to silence and the ducking becomes a mute button. */
+    duckMaxDepth: 0.6,
+
+    // ── One-shot humanisation ───────────────────────────────────────────────
+    //
+    // The single cheapest thing that stops repeated sounds sounding like a
+    // sample player. Applied per shot, never per sound.
+    /** x — +/- fractional pitch jitter, via playbackRate. */
+    pitchJitter: 0.08,
+    /** x — +/- fractional gain jitter. */
+    gainJitter: 0.06,
+
+    // ── The coin streak ladder ──────────────────────────────────────────────
+    //
+    // Pickups climb in pitch across a streak and drop back on a break. This
+    // communicates the entire bit-streak system with no HUD element at all, and
+    // it is the reason collecting feels good rather than merely scoring.
+    /** semitones — how far each successive pickup climbs. */
+    coinStreakSemitone: 1,
+    /** semitones — ceiling on the climb, so a long streak stays musical instead
+     *  of disappearing upward. One octave. */
+    coinStreakMax: 12,
+    /** s — a gap longer than this resets the ladder. The sim has no
+     *  "streak broken" event, and a gap IS the break as the player hears it. */
+    coinStreakResetSeconds: 2.5,
+
+    // ── Latency ─────────────────────────────────────────────────────────────
+    /** s — minimum lead on any scheduled cue. Scheduling at exactly
+     *  `currentTime` races the render quantum and drops the head of the sound. */
+    scheduleAhead: 0.02,
+    /** s — lower bound on the user's manual offset. Negative values reduce the
+     *  scheduling lead and clamp at zero: sound cannot be scheduled in the past. */
+    latencyOffsetMin: -0.15,
+    /** s — upper bound on the user's manual offset. */
+    latencyOffsetMax: 0.25,
+
+    // ── Lifecycle ───────────────────────────────────────────────────────────
+    /** s — master fade-in after the first gesture unlocks the context. Starting
+     *  at full gain on the first sample is a click and a jump-scare. */
+    masterFadeIn: 0.4,
+    /** s — fade before suspending on tab hide, and back after resuming. */
+    suspendFade: 0.06,
+    /** count — output channels for every rendered buffer. */
+    channels: 2,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
   // 16. Enforced budgets — docs/TUNING.md §14
   //
   // These are tests, not aspirations. They fail CI.
@@ -1184,6 +1332,20 @@ export const TUNING = {
     benchmarkTicks: 10_000,
     /** KB — first-load JS, gzipped. */
     firstLoadJsKb: 250,
+
+    /** % — ceiling on the audio graph's CPU cost, measured as offline render
+     *  time over rendered duration. A proxy for a profiler reading, and named as
+     *  one: it measures the graph, not the main thread's share of a frame. */
+    audioCpuPercent: 3,
+    /** samples — permitted drift between two music stems over a full session.
+     *  One sample at 48kHz is 21 microseconds. The real target is zero, and the
+     *  design achieves zero structurally by never restarting a stem; this is a
+     *  tolerance for the transient-detection window, not for the audio. */
+    audioDriftSamples: 1,
+    /** x — sample-to-sample amplitude step that counts as a click. Real audio at
+     *  these frequencies moves far less than this between adjacent samples;
+     *  a discontinuity from a hard gain change moves much more. */
+    audioClickThreshold: 0.25,
   },
 } as const;
 

@@ -182,8 +182,13 @@ export function stepGenerator(
       spawnEntity(state, entity, spawn.nextChunkZ);
     }
 
-    if (placed.chunk.id === "transition") {
-      emit(events, SimEvent.ThemeChange, state.tick, placed.ordinal);
+    // The EDGE of a boundary, not every chunk inside it. A transition is five
+    // chunks long, and `chunk.id === "transition"` is true for all five — which
+    // fired five theme changes for one transition, each carrying the chunk
+    // ordinal rather than the theme id its own contract in sim/events.ts
+    // promises. Both halves are fixed here.
+    if (placed.themeChanged) {
+      emit(events, SimEvent.ThemeChange, state.tick, placed.themeIndex);
     }
 
     spawn.nextChunkZ += CHUNK_LENGTH;
