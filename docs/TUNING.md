@@ -541,3 +541,77 @@ it reset when they miss, and works out what they did.
 | `<audio>` elements | **0** | Same, asserted against the live DOM |
 | Concurrent voices | **≤ `maxVoices`** | Same, over 60s of real play |
 </content>
+
+---
+
+## 17. Meta — P13
+
+Everything between runs. **None of this may execute inside the tick** — see
+[ARCHITECTURE.md](./ARCHITECTURE.md) §3. The one permitted exception is the run-summary
+recorder, which counts events and decides nothing.
+
+The cost and effect curves are in §12; this section covers what P13 added around them.
+
+### 17.1 Inventory — GAME_BIBLE §9.3
+
+| Key | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `consumableStackCap` | count | **99** | 20 – 999 | ⚙️ | The store reports how many actually landed when the cap bites, so a player is never charged for items that evaporate. |
+| `boostSlots` | count | **2** | 2 fixed | 🔒 | **Never sold as slots.** §9.3 names that as the way this genre turns a clean meta into a spreadsheet, so there is no function that changes it, and the save validator truncates a hostile file to this number. |
+| `avatarSlots` | count | **1** | 1 fixed | 🔒 | As above. |
+
+### 17.2 Progression — GAME_BIBLE §9.5
+
+| Key | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `levelOneDistance` | m | **1500** | 500 – 5,000 | ⚙️ | Level 2 arrives before the player has learned anything, so it means nothing. | The first level-up is several sessions away and nobody connects it to playing. |
+| `levelGrowth` | × | **1.18** | 1.05 – 1.4 | ⚙️ | Levels blur into each other and the number stops reading as an achievement. | Level 20 needs a lifetime nobody has. |
+| `maxLevel` | count | **50** | 20 – 200 | ⚙️ | The ceiling arrives while players are still engaged. | The curve outruns any real player and the cap is decorative. |
+
+**Level gates nothing that affects a run.** A score chase where a new player's ceiling is set
+by their account age is a queue, not a chase. §8.2's upgrade tracks are the power curve and are
+already capped at +65%; a second progression axis would undo that cap by the back door.
+
+### 17.3 Missions — GAME_BIBLE §9.4
+
+| Key | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `dailyMissionCount` | count | **3** | 2 – 5 | ⚙️ | Must stay below the pool size or the dailies never rotate. Asserted in tests. |
+| `dailyAllCompleteShards` | Shards | **1** | 1 – 3 | ⚙️ | Paid once, when all three are done. |
+| `weeklyTierShards` | Shards | **[2, 3, 5]** | — | 🔒 | Straight from §9.4. Tiers are committed to the ledger individually so a player can reconcile them. |
+| `weeklyTierCount` | count | **3** | 3 fixed | 🔒 | Changing this re-authors every contract in `missionPool.ts`. |
+
+Individual mission targets and weights live in `src/game/meta/missionPool.ts`, not here: they
+are **content**, on the same footing as chunk layouts and animation poses. What lives here is
+what governs the *system*.
+
+**Determinism.** Dailies are seeded from the UTC date via FNV-1a + mulberry32, both of which use
+only exactly-specified integer operations. Everyone worldwide gets the same three on the same
+day, and `tests/meta/missions.test.ts` asserts it across five timezones including both sides of
+the date line.
+
+### 17.4 Avatars — GAME_BIBLE §9.1
+
+| Key | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `avatarGameplayPassiveCap` | × | **0.08** | 0.03 – 0.12 | 🔒 | The ceiling on any passive that changes how a run is **played**. A build-defining passive turns an arcade score chase into an optimization puzzle: the moment one avatar is 30% better there is a correct avatar, and the roster becomes one character plus seven mistakes. |
+
+**Ochre's +10% Bit value is deliberately above this cap and is exempt.** Bit value changes what
+a run *pays*, not how it is *played* — it cannot inform a single decision inside a run, so it
+cannot define a build. The test asserts the distinction rather than a blanket rule, so nobody
+later "fixes" Ochre down to a cap it was never subject to.
+
+### 17.5 Save
+
+| Key | Unit | Default | Status | Notes |
+|---|---|---|---|---|
+| `saveVersion` | version | **3** | ⚙️ | The schema this build writes. **Bumping it requires a migration**, and the chain is tested v1 → latest. |
+
+**Nothing in `save.ts` throws.** A save that fails to load is a permanent uninstall — the
+player opens the game, sees zero Bits after fifty runs, and deletes it. Truncated JSON, wrong
+types, and a version from the future all produce a working save, repaired field by field, with
+the damage listed in `repairs`. The worst available outcome is losing one field's value.
+
+Remote sync compares **lifetime distance**, which is monotonic, rather than timestamps. Device
+clocks are wrong often enough that a timestamp comparison would let a misconfigured phone
+overwrite real progress.

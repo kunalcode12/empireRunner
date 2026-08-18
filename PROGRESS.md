@@ -28,7 +28,7 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P10** | Themes & art direction | Screen-print materials, key-lines, halftone, the four themes, transition tunnels, posterised fog | All four themes render at ≤ 6 colours; zero bloom outside Overdrive; the §11.3 ban holds under review; draw calls still in budget | Not started |
 | **P11** | Audio | Web Audio graph, buses, ducking, per-theme stems with cross-fade, pooled SFX voices | Stems stay sample-locked across a 10-minute run; no `<audio>` elements; voice pool never allocates mid-run | **Complete** — drift measured at **0 samples** over 120s; 0 `<audio>` elements; voice pool capped at 24, peak 4. Placeholders are synthesised, no assets. Silent switch + phone-call interruption unverifiable on the web platform / without a phone |
 | **P12** | Leaderboards & replay validation | API routes, submit/read, **server-side replay re-simulation**, weekly reset | A tampered score is rejected; a legitimate replay validates; server re-sim result === client result | Not started |
-| **P13** | Meta systems | Economy, upgrade cost + effect curves, avatars, boosts, inventory, dailies, weekly contract, save + migrations | Cost/effect tables match GAME_BIBLE §8 exactly; save survives a schema migration; missions roll over at 00:00 UTC | Not started |
+| **P13** | Meta systems | Economy, upgrade cost + effect curves, avatars, boosts, inventory, dailies, weekly contract, save + migrations | Cost/effect tables match GAME_BIBLE §8 exactly; save survives a schema migration; missions roll over at 00:00 UTC | **Complete** — 177 meta tests. Table snapshotted (and §8.2 corrected: two T5 cells were arithmetic slips). v1→v3 chain tested; corrupt-save recovery covers truncated JSON, wrong types and a future version. Dailies verified identical across 5 timezones. **Not wired to a run yet — that is P14.** |
 | **P14** | UI, HUD & juice | Menu, loadout, store, missions, HUD, death screen with the "you were 40m short" line, rolling numerals, auto-pause on blur | Full loop playable start→death→spend→restart; HUD pushes at ≤ 15Hz; death screen always shows the nearest unmet objective | Not started |
 | **P15** | Repair & ship hardening | Out-of-band. Fix a failed gate, or the final pass: perf sweep, budget enforcement, reduced-motion, a11y, error boundaries | Every budget in TUNING.md §14 green in CI; all five laws' tests green | Not started |
 
@@ -46,6 +46,114 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-19 — P13 · Meta systems — **Complete**
+
+**Verify gate**
+
+```
+> tsc --noEmit          (clean)
+> eslint .              (clean, 0 errors 0 warnings)
+> vitest run            Test Files 49 passed | Tests 1046 passed (was 869)
+> prettier --check .    All matched files use Prettier code style!
+```
+
+**The upgrade cost and effect table**, printed by `formatUpgradeTable()` and snapshotted by
+`tests/meta/upgrades.test.ts`:
+
+```
+COST — cost(tier) = round5(base * 2.15^(tier-1))
+┌──────────────────┬───────┬───────┬───────┬───────┬───────┬───────┬─────────┐
+│ Upgrade          │  base │    T1 │    T2 │    T3 │    T4 │    T5 │   Total │
+├──────────────────┼───────┼───────┼───────┼───────┼───────┼───────┼─────────┤
+│ Magnet Duration  │   250 │   250 │   540 │ 1,155 │ 2,485 │ 5,340 │   9,770 │
+│ Flow Gain Rate   │   300 │   300 │   645 │ 1,385 │ 2,980 │ 6,410 │  11,720 │
+│ Bit Value        │   350 │   350 │   755 │ 1,620 │ 3,480 │ 7,480 │  13,685 │
+│ Shield Count     │   400 │   400 │   860 │ 1,850 │ 3,975 │ 8,545 │  15,630 │
+└──────────────────┴───────┴───────┴───────┴───────┴───────┴───────┴─────────┘
+Full clear: 50,805 Bits
+
+EFFECT — effect(tier) = Emax * (1 - 0.6^t) / (1 - 0.6^5),  Emax = +65%
+┌──────────────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+│ Upgrade          │     T0 │     T1 │     T2 │     T3 │     T4 │     T5 │
+├──────────────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+│ Magnet Duration  │   6.00 │   7.69 │   8.71 │   9.32 │   9.68 │   9.90 │
+│ Flow Gain Rate   │   6.00 │   7.69 │   8.71 │   9.32 │   9.68 │   9.90 │
+│ Bit Value        │   1.00 │   1.28 │   1.45 │   1.55 │   1.61 │   1.65 │
+│ Shield Count     │      1 │      1 │      2 │      2 │      2 │      3 │
+└──────────────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+│ % of Emax        │   0.0% │  43.4% │  69.4% │  85.0% │  94.4% │ 100.0% │
+```
+
+| Shipped | |
+|---|---|
+| `meta/runSummary.ts` | The sim → meta boundary object + an allocation-free event recorder |
+| `meta/economy.ts` | Append-only transaction ledger, 11 variants, exhaustive on the tag |
+| `meta/backend.ts` | `EconomyBackend` — the one door for every currency read and write |
+| `meta/upgrades.ts` | 4 tracks × 5 tiers, both curves, the snapshotted balance table |
+| `meta/avatars.ts` | 8 runners, passives capped at +8%, 4 challenge unlocks |
+| `meta/inventory.ts` | Consumables (cap 99), cosmetics, the 1 avatar + 2 boost loadout |
+| `meta/missionPool.ts` | 17 dailies + 6 weekly contracts, as data |
+| `meta/missions.ts` | UTC-seeded selection, progress, and the "40m short" line |
+| `meta/progression.ts` | Player level, unlock gating, onboarding flags |
+| `meta/settle.ts` | Applies a finished run — the one entry point P14 calls |
+| `meta/save.ts` | v1→v2→v3 migration chain, repairing validator, remote sync interface |
+
+**The economy is behind an interface, and it is `Promise`-shaped for a reason.** Every method
+on `EconomyBackend` returns a promise even though the local implementation is synchronous and
+gains nothing from it. An interface whose shape only a synchronous implementation can satisfy
+is not an abstraction, it is a comment — if callers may write `backend.getBalances().bits`
+today, the swap the interface exists for is impossible tomorrow, and it would be discovered
+with the network code already written.
+
+**Bugs and doc errors found while building this**
+
+1. **GAME_BIBLE §8.2's cost table disagreed with its own formula.** Bit Value T5 read 7,485
+   and Shield Count T5 read 8,550, where `round5(350 × 2.15⁴)` is **7,480** and
+   `round5(400 × 2.15⁴)` is **8,545**; the two totals and the full-clear figure inherited the
+   error (50,815 → **50,805**). Magnet Duration and Flow Gain Rate were always right. The
+   formula is unchanged and §8.2 is corrected. The table is now snapshotted so the document
+   and the code cannot drift apart silently again.
+2. **The first draft of `runSummary.ts` restated the pickup kinds as 1/2/3.** They are 20/21/22.
+   Caught before it shipped, and fixed by importing `EntityType` from the sim rather than
+   holding a copy — which is the same class of mistake as the `ThemeChange` bug found at P11,
+   and is now pinned by a test.
+
+**Decisions that were mine to make, flagged rather than buried**
+
+- **Player level did not exist in the design.** §9.5 is new, and it is deliberately cosmetic:
+  level gates nothing that affects a run. A score chase where a new player's ceiling is set by
+  their account age is a queue, not a chase, and §8.2's tracks are already the power curve.
+- **Ochre's +10% Bit value sits above the +8% passive cap, on purpose.** Bit value changes what
+  a run *pays*, not how it is *played*, so it cannot inform a decision inside a run and cannot
+  define a build. The test asserts the *distinction* rather than a blanket rule, so nobody
+  later "fixes" Ochre down to a cap it was never subject to.
+- **Save v1 and v2 never shipped to a player.** They are the shapes this file would have had
+  before the ledger and before the two-slot loadout. They exist so the migration chain is
+  exercised by tests today rather than executed for the first time in production, on someone's
+  real save. Migration code that has never run is migration code that does not work.
+- **`zod` was not used.** It is present in `node_modules` but is a *transitive, dev-only*
+  dependency — not in `package.json`, `dev: true` in the lockfile — so importing it would ship
+  production code depending on a package a production install does not have. The validator is
+  hand-written, which is also the better fit: the requirement is per-field **repair**, and a
+  parser that throws on the first bad field discards a save with 49 good ones.
+
+**Known limits**
+
+- **Nothing calls `settleRun` yet.** Applying rewards at run end belongs to the death screen,
+  which is P14. The recorder, the settlement and every curve are built and tested here; the
+  wiring into `useGameLoop` is deliberately not done, and no part of this phase is reachable
+  from a running game yet.
+- **A Fracture can still be taken with 0 Shards.** GAME_BIBLE §12 cause 6 ends a run on a fatal
+  hit with `maxFracturesPerRun` spent *or 0 Shards held*, but the sim arms Fracture without
+  consulting a balance — correctly, since it has none. The cost is charged afterwards and the
+  ledger refuses it, which `settle.ts` records in `shortfalls` rather than failing the whole
+  settlement. Fixing it properly means handing the sim a pre-run Shard count. **Flagged for P14.**
+- **The economy has never been played.** Every number here is asserted against the design
+  document, not against a player. Whether 50,805 Bits is the right length for the treadmill is
+  a playtest question and nobody has run it.
+
+---
 
 ### 2026-08-18 — P11 · Audio — **Complete**
 

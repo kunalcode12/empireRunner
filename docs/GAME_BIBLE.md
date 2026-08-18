@@ -468,10 +468,17 @@ cost(tier) = round5( base * 2.15^(tier - 1) )        tier ∈ 1..5
 |---|---|---|---|---|---|---|---|
 | Magnet Duration | 250 | 250 | 540 | 1,155 | 2,485 | 5,340 | **9,770** |
 | Flow Gain Rate | 300 | 300 | 645 | 1,385 | 2,980 | 6,410 | **11,720** |
-| Bit Value | 350 | 350 | 755 | 1,620 | 3,480 | 7,485 | **13,690** |
-| Shield Count | 400 | 400 | 860 | 1,850 | 3,975 | 8,550 | **15,635** |
+| Bit Value | 350 | 350 | 755 | 1,620 | 3,480 | 7,480 | **13,685** |
+| Shield Count | 400 | 400 | 860 | 1,850 | 3,975 | 8,545 | **15,630** |
 
-Full clear ≈ **50,815 Bits** ≈ 50 competent runs at ~1,000 Bits each.
+Full clear ≈ **50,805 Bits** ≈ 50 competent runs at ~1,000 Bits each.
+
+> **Corrected at P13.** Two T5 cells were arithmetic slips: Bit Value read 7,485 and Shield
+> Count 8,550, where `round5(350 × 2.15⁴)` is **7,480** and `round5(400 × 2.15⁴)` is **8,545**.
+> The two totals and the full-clear figure inherited the error. The formula was right and is
+> unchanged; only the table it generates is fixed. Magnet Duration and Flow Gain Rate were
+> always correct. `tests/meta/upgrades.test.ts` now snapshots the whole table, so the document
+> and the code cannot drift apart again without a visible diff.
 
 ### 8.3 Diminishing effect curve
 
@@ -547,6 +554,8 @@ Examples: *travel 4,000m total* · *trigger Overdrive twice* · *bank 45 near-mi
 
 **Weekly contract** — one 3-tier objective, resets Monday 00:00 UTC. Tiers award 2 / 3 / 5 Shards. Tier 3 should require roughly 5–6 strong runs, not grinding.
 
+**The full daily pool is authored in `src/game/meta/missionPool.ts`** — 17 dailies and 6 weekly contracts, weighted so that most of what a competent run does makes progress on something. The five examples above are all drawn from it. Selection is seeded from the **UTC date**, so every player worldwide sees the same three on the same day.
+
 **The death screen is the retention hook.** Every death screen shows the closest unmet objective as a near-miss:
 
 ```
@@ -557,6 +566,24 @@ Examples: *travel 4,000m total* · *trigger Overdrive twice* · *bank 45 near-mi
 ```
 
 That line does more for D2 retention than any reward in the game. It is not decoration — it is a **required** element of the death screen (P14).
+
+**Ranked by fraction complete, not by absolute remainder.** Being 40m from a 2,000m goal (98%) beats being 2 near-misses from a 45 near-miss goal (95.6%). Ranking by raw remainder instead would surface whichever objective happens to count in small numbers, which reads as random and kills the line.
+
+### 9.5 Player level
+
+**DECISION (P13).** The design had no level system; one was requested and this is it.
+
+```
+distanceForLevel(n) = levelOneDistance * (levelGrowth^(n-1) - 1) / (levelGrowth - 1)
+```
+
+A geometric series at 1,500m and ×1.18, capped at level 50. Level 10 is roughly 30,000m of lifetime distance; level 30 is around 1,000,000m.
+
+**Level is a record of time spent, never a source of power.** It gates nothing that affects a run. The alternative — levels that unlock upgrade tracks or raise a stat — is the standard mobile pattern and it is wrong for this game specifically: AXIS is a score chase, and a score chase where a new player's ceiling is set by their account age rather than their hands is a queue, not a chase. The upgrade tracks in §8.2 are already the power curve and are already capped at +65%; a second progression axis would undo that cap by the back door.
+
+What level is *for*: a legible "you have played a lot" number, and a hook for cosmetic rewards, which cannot affect a run by definition.
+
+**Screen gating is deliberately shallow** — the store opens after 2 runs, missions after 3, the loadout after 4. It exists so a first-time player meets one idea at a time. Anything longer is a drip-feed, and a drip-feed on an arcade runner reads as a locked menu.
 
 ---
 

@@ -67,11 +67,18 @@ axis/
 │   │   │   ├── settings.ts     persisted volumes / mute / offset, clamped on every read
 │   │   │   └── director.ts     the seam: handleEvent, setTelemetry, dispose
 │   │   │
-│   │   ├── meta/
-│   │   │   ├── economy.ts      Bits, Shards, upgrade cost + effect curves
-│   │   │   ├── inventory.ts    consumables, cosmetics, loadout
-│   │   │   ├── missions.ts     dailies, weekly contract
-│   │   │   └── save.ts         persistence, migrations, integrity
+│   │   ├── meta/              runs between runs. Pure functions over frozen data.
+│   │   │   ├── runSummary.ts   the sim -> meta boundary object + its event recorder
+│   │   │   ├── economy.ts      Bits and Shards as an append-only transaction ledger
+│   │   │   ├── backend.ts      EconomyBackend — the ONE door every balance goes through
+│   │   │   ├── upgrades.ts     4 tracks x 5 tiers, cost + diminishing effect curves
+│   │   │   ├── avatars.ts      8 runners: passives, unlocks, visual descriptors
+│   │   │   ├── inventory.ts    consumables, cosmetics, the 1 avatar + 2 boost loadout
+│   │   │   ├── missionPool.ts  the mission catalogue (data)
+│   │   │   ├── missions.ts     UTC-seeded dailies, weekly contract, the near-miss line
+│   │   │   ├── progression.ts  player level, unlock gating, onboarding flags
+│   │   │   ├── settle.ts       applies a finished run: the one entry point P14 calls
+│   │   │   └── save.ts         versioned schema, migration chain, repairing validator
 │   │   │
 │   │   └── input/
 │   │       ├── keyboard.ts
@@ -221,8 +228,8 @@ Hard rules, all enforced by ESLint import boundaries in P01:
 | `ui/` never imports `three` or `@react-three/*` | The HUD is DOM. A canvas-rendered HUD costs draw calls the budget does not have. |
 | `config/` imports nothing | It is leaf data. |
 | `input/` produces intents; it does not call into the sim | The sim pulls the intent queue at tick boundaries. |
-| `meta/` never runs during a run | Economy and missions settle at run end, off the hot path. |
-| `audio/` may import `sim/events.ts` — **constants only** | Added at P11. The ring buffer is the sanctioned one-way channel from sim to presentation, and mapping an event to a sound requires knowing the event kinds. The alternative is a duplicate 28-entry enum whose numeric values are part of the replay format, which is strictly worse. Read-only, downward, and nothing in `audio/` can write to the sim. |
+| `meta/` runs no economy or mission logic during a run | Economy and missions settle at run end, off the hot path. **One exception, added at P13:** the run-summary recorder in `meta/runSummary.ts` counts events inside the frame loop. It allocates nothing, decides nothing, and cannot reach a balance — there is no economy import in that file. It exists because `bitsCollected`, `nearMisses` and `peakFlow` are not fields in `SimState`, and the event ring holds only 256 entries, so by run end the data is gone rather than merely awkward to reach. |
+| `audio/` and `meta/` may import sim **constants only** | `audio/` at P11, `meta/` at P13. The ring buffer is the sanctioned one-way channel from sim to presentation, and mapping an event to a sound — or to a mission counter — requires knowing the event and pickup kinds. The alternative is duplicate enums whose numeric values are part of the replay format, and that duplication is precisely what caused the `ThemeChange` bug found at P11. Read-only, downward, and neither layer can write to the sim. |
 
 ### 3.1 Where state lives
 

@@ -304,6 +304,13 @@ export default defineConfig([
       // jump gravity. Values that affect the mix ACROSS sounds — bus gains,
       // jitter ranges, duck depth, the tempo grid — live in TUNING.audio.
       "src/game/audio/recipes.ts",
+      // The mission catalogue. Same case a fourth time: "travel 4,000m total"
+      // IS the mission, not a tunable, and naming each target would make the
+      // catalogue unreadable to whoever authors the next one. Numbers that
+      // govern the SYSTEM — how many dailies, what a tier pays, when the week
+      // rolls over — live in TUNING.meta, which is why the logic sits in
+      // missions.ts and only the data is here.
+      "src/game/meta/missionPool.ts",
     ],
     rules: {
       "no-magic-numbers": [

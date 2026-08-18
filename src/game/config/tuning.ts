@@ -1143,6 +1143,62 @@ export const TUNING = {
   },
 
   // ───────────────────────────────────────────────────────────────────────────
+  // 15g. Meta — docs/TUNING.md §17
+  //
+  // Everything between runs. None of this may execute inside the tick —
+  // docs/ARCHITECTURE.md §3. The one permitted exception is the run-summary
+  // recorder, which counts events and decides nothing.
+  // ───────────────────────────────────────────────────────────────────────────
+  meta: {
+    // ── Inventory — GAME_BIBLE §9.3 ─────────────────────────────────────────
+    /** count — how high a consumable stacks. */
+    consumableStackCap: 99,
+    /** count — boosts equipped per run. NEVER sold as slots: that is how this
+     *  genre turns a clean meta into a spreadsheet. */
+    boostSlots: 2,
+    /** count — avatars equipped per run. */
+    avatarSlots: 1,
+
+    // ── Progression — GAME_BIBLE §9.5 ───────────────────────────────────────
+    //
+    // DECISION (P13). The brief asked for "player level from lifetime distance"
+    // and the design had no level system at all, so this curve is new. It is
+    // deliberately cosmetic: level gates nothing that affects a run, because a
+    // level that gates power turns a score chase into a grind check.
+    /** m — lifetime distance required to reach level 2. */
+    levelOneDistance: 1500,
+    /** x — geometric growth per level. At 1.18, level 10 is ~7,700m lifetime and
+     *  level 30 is ~250,000m — a few hundred runs, which is the intended shape
+     *  for a number whose only job is to say "you have played a lot". */
+    levelGrowth: 1.18,
+    /** count — level ceiling. Past this the curve would outrun any real player. */
+    maxLevel: 50,
+
+    // ── Missions — GAME_BIBLE §9.4 ──────────────────────────────────────────
+    /** count — dailies active at once. */
+    dailyMissionCount: 3,
+    /** Shards — awarded for completing all three dailies. */
+    dailyAllCompleteShards: 1,
+    /** Shards — per weekly contract tier. */
+    weeklyTierShards: [2, 3, 5],
+    /** count — tiers in the weekly contract. */
+    weeklyTierCount: 3,
+
+    // ── Avatars — GAME_BIBLE §9.1 ───────────────────────────────────────────
+    /** x — hard ceiling on any passive that changes how a run PLAYS.
+     *
+     *  Kestrel's +8% Flow gain is the strongest such passive and this is what
+     *  holds it there. Ochre's +10% Bit value is above this number and is
+     *  deliberately exempt: it changes what a run PAYS, not how it is played, so
+     *  it cannot define a build. `avatars.ts` asserts the distinction. */
+    avatarGameplayPassiveCap: 0.08,
+
+    // ── Save — the chain in save.ts ─────────────────────────────────────────
+    /** The schema version this build writes. Bumping it requires a migration. */
+    saveVersion: 3,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
   // 15f. Audio — docs/TUNING.md §16
   //
   // Everything here is PRESENTATION. Audio reads the sim event ring and the
