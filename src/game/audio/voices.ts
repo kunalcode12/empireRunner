@@ -113,7 +113,15 @@ export function createVoicePool(
       gain.connect(panner);
       panner.connect(destination);
     }
-    slots.push({ gain, panner, source: null, startedAt: 0, endsAt: 0, active: false, generation: 0 });
+    slots.push({
+      gain,
+      panner,
+      source: null,
+      startedAt: 0,
+      endsAt: 0,
+      active: false,
+      generation: 0,
+    });
   }
 
   let peak = 0;

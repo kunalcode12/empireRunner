@@ -52,6 +52,44 @@ export interface AudioEvent {
   readonly payload0: number;
 }
 
+/**
+ * Read-only diagnostics published on `window.__axisAudio`.
+ *
+ * Same precedent as `window.__axisPerf` in `render/perf/PerfMonitor.tsx`: the
+ * numbers a gate needs cannot be read from outside the module graph, and the
+ * e2e suite runs against a **production** build, so a `NODE_ENV` guard would
+ * strip exactly the thing the gate exists to measure.
+ *
+ * `stems` hands out the live `AudioBuffer`s so the gate can render and analyse
+ * real audio — the loop seam, the click scan and the two-minute drift check all
+ * read actual samples rather than trusting an argument about the design.
+ *
+ * Nothing here is writable and nothing reads back into the game.
+ */
+export interface AudioDiagnostics {
+  ready: boolean;
+  contextState: string;
+  sampleRate: number;
+  /** The context time every stem is aligned to. */
+  startTime: number;
+  themeId: number;
+  intensity: number;
+  voicePeak: number;
+  /** s — measured output latency. */
+  latency: number;
+  grid: {
+    beatSeconds: number;
+    barSeconds: number;
+    loopSeconds: number;
+    loopSamples: number;
+  } | null;
+  stems: Record<string, AudioBuffer> | null;
+}
+
+interface AudioWindow extends Window {
+  __axisAudio?: AudioDiagnostics;
+}
+
 export interface AudioDirectorOptions {
   /** An engine to use. One is built from `engineOptions` when omitted. */
   engine?: AudioEngine;
@@ -108,6 +146,62 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
   let flowNorm = 0;
 
   const stemCache = new Map<number, ThemeBuffers>();
+
+  /**
+   * The diagnostics object, allocated once and mutated in place.
+   *
+   * `publish` runs from `setTelemetry`, which the render loop calls every frame.
+   * Rebuilding this object there would be 60 allocations a second of garbage
+   * nobody reads — the same reasoning that keeps `RenderView` a reused struct.
+   */
+  const diagnostics: AudioDiagnostics = {
+    ready: false,
+    contextState: "none",
+    sampleRate: 0,
+    startTime: 0,
+    themeId: 0,
+    intensity: 0,
+    voicePeak: 0,
+    latency: 0,
+    grid: null,
+    stems: null,
+  };
+
+  /** Refreshes the published diagnostics in place. Allocates nothing. */
+  function publish(): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    diagnostics.ready = ready;
+    diagnostics.contextState = engine.context?.state ?? "none";
+    diagnostics.sampleRate = engine.context?.sampleRate ?? 0;
+    diagnostics.startTime = music?.startTime ?? 0;
+    diagnostics.themeId = music?.themeId ?? themeIndex;
+    diagnostics.intensity = music?.intensity ?? 0;
+    diagnostics.voicePeak = Math.max(sfxPool?.peak ?? 0, uiPool?.peak ?? 0);
+    diagnostics.latency = engine.latency.effective;
+
+    if (music !== null) {
+      diagnostics.grid = {
+        beatSeconds: music.grid.beatSeconds,
+        barSeconds: music.grid.barSeconds,
+        loopSeconds: music.grid.loopSeconds,
+        loopSamples: music.grid.loopSamples,
+      };
+    }
+
+    const stems = stemCache.get(themeIndex);
+    if (stems !== undefined) {
+      diagnostics.stems = {
+        base: stems.base,
+        percussion: stems.percussion,
+        tension: stems.tension,
+        overdrive: stems.overdrive,
+      };
+    }
+
+    (window as AudioWindow).__axisAudio = diagnostics;
+  }
 
   async function loadTheme(id: number): Promise<ThemeBuffers> {
     const cached = stemCache.get(id);
@@ -177,15 +271,23 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
       lead: Math.max(TUNING.audio.scheduleAhead, engine.latency.effective),
     });
 
-    ready = true;
+    // `ready` flips only once the stems are rendered AND playing.
+    //
+    // Setting it before the await would make it mean "the graph exists", which
+    // is not what any caller wants to know and is not what it says. The e2e gate
+    // reads `ready` and then immediately reads `stems`; with the flag raised
+    // early it saw `stems: null` and four assertions failed on a lie rather than
+    // on a defect.
     await music.play(themeIndex);
     if (disposed || music === null) {
       return;
     }
+    ready = true;
     music.setIntensity(speedNorm, flowNorm, engine.now());
     if (overdriveActive) {
       music.setOverdrive(true, engine.now());
     }
+    publish();
   }
 
   const unsubscribe = engine.onReady(() => {
@@ -215,7 +317,7 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
         case SimEvent.ThemeChange:
           themeIndex = Math.max(0, Math.trunc(event.payload0));
           if (music !== null) {
-            void music.play(themeIndex);
+            void music.play(themeIndex).then(publish);
           }
           break;
         case SimEvent.OverdriveStart:
@@ -244,6 +346,7 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
       speedNorm = normalise(worldSpeed, TUNING.speed.baseSpeed, SPEED_SPAN);
       flowNorm = normalise(flow, 0, TUNING.flow.flowMax);
       music?.setIntensity(speedNorm, flowNorm, engine.now());
+      publish();
     },
 
     dispose(): void {
@@ -266,6 +369,9 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
       ducker = null;
       stemCache.clear();
       engine.dispose();
+      if (typeof window !== "undefined") {
+        delete (window as AudioWindow).__axisAudio;
+      }
     },
   };
 }

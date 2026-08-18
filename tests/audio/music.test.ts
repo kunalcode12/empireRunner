@@ -9,12 +9,7 @@ import {
   type ThemeBuffers,
 } from "@/game/audio/music";
 import { createGrid } from "@/game/audio/synth";
-import {
-  FakeAudioContext,
-  asAudioBuffer,
-  asBaseContext,
-  asGainNode,
-} from "../helpers/fake-audio";
+import { FakeAudioContext, asAudioBuffer, asBaseContext, asGainNode } from "../helpers/fake-audio";
 
 const SAMPLE_RATE = 48_000;
 
@@ -197,13 +192,20 @@ describe("the Overdrive swap", () => {
     const { context, music } = system();
     await music.play(0);
     context.advance(music.grid.barSeconds * 3);
+
+    // Only the events the swap itself adds. The set-up automation from `play`
+    // is legitimately behind us by now.
+    const before = context.created.gains.map((gain) => gain.gain.events.length);
     music.setOverdrive(true, context.currentTime);
 
-    for (const gain of context.created.gains) {
-      for (const event of gain.gain.events) {
+    let checked = 0;
+    context.created.gains.forEach((gain, index) => {
+      for (const event of gain.gain.events.slice(before[index] ?? 0)) {
         expect(event.time).toBeGreaterThanOrEqual(context.currentTime - 1e-9);
+        checked += 1;
       }
-    }
+    });
+    expect(checked).toBeGreaterThan(0);
   });
 
   it("ignores a redundant swap request", async () => {
@@ -265,7 +267,7 @@ describe("the Overdrive swap", () => {
 
 describe("the bar grid", () => {
   it("nextBar returns whole bars from the origin", async () => {
-    const { context, music } = system();
+    const { music } = system();
     await music.play(0);
     const origin = music.startTime;
 

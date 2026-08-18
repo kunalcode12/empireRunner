@@ -26,7 +26,7 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P08** | Flow & Overdrive | Flow meter, all gain/decay sources, multiplier, flow→speed coupling, Overdrive mode + palette inversion + shatter | Flow math matches TUNING.md §9.1 in headless tests; Overdrive lasts exactly 6.0s, exits at 25 Flow; crash zeroes Flow | **Complete (sim only — gains cannot fire, nothing spawns)** |
 | **P09** | Fracture & cosmetic physics | ~~Death freeze, correct-verb solver, 1.2s slow-mo window, resume~~ (landed at P08); Rapier v2 debris and ragdolls; the palette inversion and Overdrive/Fracture visuals | Solver picks the single clearing verb; arms only on single-answer deaths; **Rapier never writes to sim** (boundary test) | Sim half **Complete** at P08 · render half Not started |
 | **P10** | Themes & art direction | Screen-print materials, key-lines, halftone, the four themes, transition tunnels, posterised fog | All four themes render at ≤ 6 colours; zero bloom outside Overdrive; the §11.3 ban holds under review; draw calls still in budget | Not started |
-| **P11** | Audio | Web Audio graph, buses, ducking, per-theme stems with cross-fade, pooled SFX voices | Stems stay sample-locked across a 10-minute run; no `<audio>` elements; voice pool never allocates mid-run | Not started |
+| **P11** | Audio | Web Audio graph, buses, ducking, per-theme stems with cross-fade, pooled SFX voices | Stems stay sample-locked across a 10-minute run; no `<audio>` elements; voice pool never allocates mid-run | **Complete** — drift measured at **0 samples** over 120s; 0 `<audio>` elements; voice pool capped at 24, peak 4. Placeholders are synthesised, no assets. Silent switch + phone-call interruption unverifiable on the web platform / without a phone |
 | **P12** | Leaderboards & replay validation | API routes, submit/read, **server-side replay re-simulation**, weekly reset | A tampered score is rejected; a legitimate replay validates; server re-sim result === client result | Not started |
 | **P13** | Meta systems | Economy, upgrade cost + effect curves, avatars, boosts, inventory, dailies, weekly contract, save + migrations | Cost/effect tables match GAME_BIBLE §8 exactly; save survives a schema migration; missions roll over at 00:00 UTC | Not started |
 | **P14** | UI, HUD & juice | Menu, loadout, store, missions, HUD, death screen with the "you were 40m short" line, rolling numerals, auto-pause on blur | Full loop playable start→death→spend→restart; HUD pushes at ≤ 15Hz; death screen always shows the nearest unmet objective | Not started |
@@ -46,6 +46,147 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-18 — P11 · Audio — **Complete**
+
+**Verify gate**
+
+```
+> tsc --noEmit          (clean)
+> eslint .              (clean, 0 errors 0 warnings)
+> vitest run            Test Files 41 passed | Tests 869 passed (was 756)
+> next build            ✓ / · /_not-found · /play
+> prettier --check .    All matched files use Prettier code style!
+> playwright test       38 passed (7.0m), desktop-chromium + mobile-chromium
+```
+
+**Regression check — the render budgets did not move.** Audio adds no draw calls, and the
+P05/P07 gates are unchanged with the whole audio layer running:
+
+| | desktop | mobile |
+|---|---|---|
+| draw calls peak | **16** (budget < 100) | **11** (budget < 50) |
+| audio graph CPU (proxy) | 2.718% | 2.814% |
+
+(The fps figures in that same run are meaningless and are not quoted: six Playwright workers
+were competing for one software rasteriser. See the P05 and P07 entries — fps on real hardware
+remains unverified.)
+
+**The 2-minute session the prompt asked for, measured rather than described:**
+
+```
+========================================================================
+AXIS AUDIO — drift over 120s
+========================================================================
+  loops compared     15
+  max sample delta   0.000e+0  (first loop vs last)
+  worst sample       -1        (no mismatch found)
+  offline render     3262ms for 120s of audio
+  graph CPU (proxy)  2.718%   budget < 3%
+========================================================================
+
+  loop seam continuity          worst internal step (for scale)
+  base        0.00025           0.27655
+  percussion  0.00000           0.14906
+  tension     0.00003           0.04913
+  overdrive   0.00027           0.30458
+
+  worst step across a layer cross-fade   0.13818   threshold 0.25
+  voice peak over 60s of play            4         cap 24
+  output latency (headless)              10.0ms
+  <audio> elements in the DOM            0
+```
+
+**Drift is zero, and it is zero structurally.** The test renders 120 seconds of the real stem
+buffers offline and compares the final loop against the first **sample for sample**; the
+maximum difference is exactly `0`, not "close". That follows from the design rather than from
+luck: four buffers of identical integer sample length, started at one `AudioContext` time and
+looped forever, are read from the same sample counter and cannot separate.
+
+**The CPU figure is a proxy and has little headroom.** 2.718% against a 3% budget. It measures
+offline render time over rendered duration — the graph's cost, not the audio thread's share of
+a frame — because no web API reports the latter. It is measured in a software-rendering
+headless browser, so it is conservative, but it is close enough to the budget to be worth
+watching. Headroom, if it is ever needed, is in the stem count or the loop length.
+
+| Shipped | |
+|---|---|
+| `audio/engine.ts` | One `AudioContext`, built on the first gesture. Bus graph `music → musicDuck → master`, `sfx`/`ui` → master. Suspend/resume, interruption recovery |
+| `audio/voices.ts` | Pooled voices, cap 24, oldest-voice stealing with a 6ms fade |
+| `audio/synth.ts` | Offline render of every sound; seamless-loop machinery |
+| `audio/recipes.ts` | 26 one-shots + 4 stems × 4 themes, as data |
+| `audio/music.ts` | Adaptive layers, bar-quantised Overdrive swap, loop-aligned theme change |
+| `audio/sfx.ts` | Event → sound, ±8% pitch / ±6% gain, the coin streak ladder |
+| `audio/ducking.ts` | Side-chain, 8ms attack / 180ms release, dips coalesce |
+| `audio/latency.ts` | `outputLatency` probe, scheduling lead, user offset |
+| `audio/settings.ts` | Persisted volumes/mute/offset, clamped on every read |
+| `audio/director.ts` | The seam: `handleEvent`, `setTelemetry`, `dispose` |
+| `render/useGameLoop.ts` | Wires the director into the drain and the frame loop |
+
+**No dependency was added.** `howler` is now marked ❌ **never** in ARCHITECTURE §4: the whole
+layer is raw Web Audio in ~1,400 lines, and howler's value is `<audio>` fallback, which this
+project bans.
+
+**Every sound is a synthesised placeholder and is labelled as one.** There are no audio assets
+in this repository and no `.mp3` or `.ogg` path is referenced anywhere — `tests/e2e/audio.spec.ts`
+asserts no audio request 404s. The recipes occupy the right frequency ranges with the right
+envelopes and the right relative loudness, so **the mix is real** even though the timbres are
+synthetic. Swapping in recorded audio means replacing the render step, not the architecture.
+
+**Bugs found and fixed while building this**
+
+1. **`SimEvent.ThemeChange` never carried a theme id** — the contract in `sim/events.ts` says
+   `payload0 = theme id`; `sim/generator.ts` was emitting `placed.ordinal`, a monotonic chunk
+   counter, **and emitting it five times per boundary** because a transition is five chunks and
+   the test was `chunk.id === "transition"`. Fixed in `sim/level/generator.ts` (new
+   `themeIndex` / `themeChanged` fields on `PlacedChunk`) and `sim/generator.ts`. This is a
+   **sim change made outside this phase's scope** — it was the only way to make a documented
+   contract true, it changes no sim state and no replay hash, and P10 would have hit it next
+   from the other side, where "the palette cross-faded five times to a chunk index" is a
+   considerably harder bug to trace. Pinned by `tests/generator/themes.test.ts` (6 tests).
+2. **The bar grid drifted against its own buffers.** `createGrid` derived `beatSeconds` from
+   `60 / bpm` while the rendered loop was `round(ideal × sampleRate)` samples — 5.95µs shorter.
+   Bar boundaries computed from the ideal tempo therefore sat a fraction of a sample off the
+   real musical bar and compounded: **22 samples off the downbeat 78 loops into a ten-minute
+   run.** Drift, reintroduced through a division. Bars and beats now divide the *real* loop, at
+   a cost of ~0.001 cent of tempo.
+3. **`nextBar` was the identity function at the start of every session.** The origin guard was
+   `startTime === 0`, and zero is a legitimate origin for a freshly created context. Any player
+   reaching Flow 100 quickly enough got an unquantised Overdrive swap. Now a separate flag.
+4. **`ready` lied.** It flipped before the stems finished rendering, so a consumer that read
+   `ready` then read `stems` got `null`. Four e2e assertions failed on the lie rather than on a
+   defect. It now means "rendered and playing".
+5. **A stolen voice's late `onended` freed the slot that had replaced it** — caught by the
+   generation counter, and pinned by a test.
+
+**Known limits, stated rather than buried**
+
+- **The iOS silent switch cannot be read from the web platform.** There is no API. The usual
+  workaround routes through `<audio>`, which is banned here for good reason. `engine.ts`
+  feature-detects `navigator.audioSession` (WebKit-only, absent from `lib.dom.d.ts`) and
+  declares `"auto"`, which leaves the switch in control where the platform supports it. That is
+  the whole of what "honour the silent switch" can mean from a web page.
+- **"A phone call mid-run does not kill audio permanently" is not verified on a phone.** The
+  recovery path — an unrequested `statechange`, gesture listeners re-armed, resume on the next
+  tap — is unit tested against a fake context in `tests/audio/engine.test.ts`, and the
+  visibility half is verified against a real `document` in the e2e gate. Neither is a phone.
+- **Real tab-backgrounding did not reproduce in headless Chromium.** `bringToFront()` on a
+  second tab left the first reporting `visibility=visible`, so that test only proves audio is
+  still running afterwards. The suspend/resume path itself is proven by the `visibilitychange`
+  test, which shows `suspended → running`.
+- **A gesture that lands before the game loop mounts is lost.** The listeners do not exist
+  until `useGameLoop`'s effect has run; a player clicking during load has that click swallowed
+  and audio unlocks on their next input instead. This broke all ten e2e tests on the first run.
+  Mild in practice — a player who is playing produces another input within a second — but real.
+- **Nobody has heard any of this.** No speakers, no ears. Every claim above is a measurement of
+  samples, timings and scheduled automation. The mix balance, and whether the placeholders are
+  *pleasant*, are unevaluated.
+- `tests/sim/layering.test.ts > rejects importing three` fails on a **cold** filesystem cache:
+  the first ESLint invocation in a fresh process takes ~33s against a 5s default timeout. It
+  passes on every warm run, and it is unrelated to this phase — flagged here rather than
+  silently retuned, since the test belongs to P01.
+
+---
 
 ### 2026-08-17 — P07 + feel · Live generator, animation, impact, particles — **Complete (code) · fps gate PARTIAL**
 

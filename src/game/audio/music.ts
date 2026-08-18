@@ -172,6 +172,17 @@ export function createMusicSystem(
   const lead = options.lead ?? TUNING.audio.scheduleAhead;
 
   let startTime = 0;
+  /**
+   * Whether `startTime` has been established.
+   *
+   * A separate flag rather than testing `startTime === 0`, because zero is a
+   * legitimate origin — a context that has only just been created reads
+   * `currentTime` at or very near 0, and the sentinel version silently made
+   * `nextBar` the identity function for the first moments of every session.
+   * Which is to say: the Overdrive swap was not quantised at all if the player
+   * reached Flow 100 quickly enough.
+   */
+  let originSet = false;
   let current: StemSet | null = null;
   let retiring: StemSet | null = null;
   let overdriveOn = false;
@@ -183,7 +194,7 @@ export function createMusicSystem(
   let loadToken = 0;
 
   function nextBar(time: number): number {
-    if (startTime === 0) {
+    if (!originSet) {
       return time;
     }
     const elapsed = time - startTime;
@@ -276,6 +287,7 @@ export function createMusicSystem(
       current = null;
     }
     startTime = 0;
+    originSet = false;
     overdriveOn = false;
     swapPendingUntil = Number.NEGATIVE_INFINITY;
   }
@@ -321,6 +333,7 @@ export function createMusicSystem(
         // First start defines the grid origin for the entire session. Every
         // later alignment is measured from here.
         startTime = at;
+        originSet = true;
         const set = buildSet(themeId, buffers, at);
         rampTo(set.themeGain.gain, 1, at, TUNING.audio.themeFade);
         current = set;

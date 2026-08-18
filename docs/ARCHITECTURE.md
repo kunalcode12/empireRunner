@@ -55,10 +55,17 @@ axis/
 │   │   │   ├── postfx/         bloom (Overdrive only), vignette, transient CA
 │   │   │   └── interpolate.ts  blends the two most recent sim snapshots
 │   │   │
-│   │   ├── audio/
-│   │   │   ├── graph.ts        AudioContext, buses, ducking
-│   │   │   ├── stems.ts        per-theme music stems, cross-fade on transition
-│   │   │   └── sfx.ts          pooled one-shot voices
+│   │   ├── audio/              raw Web Audio. No library. Framework-free, like input/.
+│   │   │   ├── engine.ts       AudioContext, bus graph, gesture unlock, interruption recovery
+│   │   │   ├── voices.ts       pooled one-shot voices, cap + oldest-voice stealing
+│   │   │   ├── synth.ts        offline render of every sound; seamless-loop machinery
+│   │   │   ├── recipes.ts      sound-design data: 26 one-shots + 4 stems x 4 themes
+│   │   │   ├── music.ts        adaptive layered stems, bar-quantised Overdrive swap
+│   │   │   ├── sfx.ts          sim event -> sound, pitch/gain jitter, coin streak ladder
+│   │   │   ├── ducking.ts      side-chain: music steps aside for gameplay sounds
+│   │   │   ├── latency.ts      outputLatency probe, scheduling lead, user offset
+│   │   │   ├── settings.ts     persisted volumes / mute / offset, clamped on every read
+│   │   │   └── director.ts     the seam: handleEvent, setTelemetry, dispose
 │   │   │
 │   │   ├── meta/
 │   │   │   ├── economy.ts      Bits, Shards, upgrade cost + effect curves
@@ -215,6 +222,7 @@ Hard rules, all enforced by ESLint import boundaries in P01:
 | `config/` imports nothing | It is leaf data. |
 | `input/` produces intents; it does not call into the sim | The sim pulls the intent queue at tick boundaries. |
 | `meta/` never runs during a run | Economy and missions settle at run end, off the hot path. |
+| `audio/` may import `sim/events.ts` — **constants only** | Added at P11. The ring buffer is the sanctioned one-way channel from sim to presentation, and mapping an event to a sound requires knowing the event kinds. The alternative is a duplicate 28-entry enum whose numeric values are part of the replay format, which is strictly worse. Read-only, downward, and nothing in `audio/` can write to the sim. |
 
 ### 3.1 Where state lives
 
@@ -253,7 +261,7 @@ no dependency is added, removed or upgraded without approval.
 | `r3f-perf` | 7.2.3 | ✅ P01 | Dev-only perf HUD. Must be absent from the production bundle. |
 | `leva` | 0.10.1 | ✅ P01 | Dev-only tuning panel bound to `tuning.ts`, clamped to the ranges in [TUNING.md](./TUNING.md). Tree-shaken from prod. |
 | `maath` | — | ❌ P05 | Easing and interpolation helpers for 3D. Not yet installed. |
-| `howler` *(or raw Web Audio)* | — | ❌ P11 | Audio scheduling against a real `AudioContext` clock. **`<audio>` elements are banned** — they have no sample-accurate clock and music stems will drift. Not yet installed; raw Web Audio may make this unnecessary. |
+| `howler` | — | ❌ **never** | **Not installed, and no longer needed.** P11 shipped the whole audio layer on raw Web Audio — buses, ducking, a voice pool, adaptive stems and offline-rendered procedural sounds — in ~1,400 lines with no dependency. Howler's value is cross-browser `<audio>` fallback and sprite management, and this project bans `<audio>` outright (no sample-accurate clock; music stems drift). **`<audio>` elements remain banned** and `tests/e2e/audio.spec.ts` asserts the page contains none. |
 
 Bundle analysis needs **no** dependency: `next experimental-analyze` is built into Next 16.1+
 and is wired as `npm run analyze`.

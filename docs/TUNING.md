@@ -418,4 +418,126 @@ These are **tests, not aspirations.** They live in CI from P01 and fail the buil
 3. If it is 🔒 **LOCKED**, the commit message must name the playtest that justified it.
 4. If it is 🔧 **DERIVED**, do not change it. Change its inputs.
 5. Run `npm run test` — several tuning invariants are asserted (`rollCommitLock < rollDuration`, `speedCeiling + flowSpeedBonus <= maxSpeed`, `playerHeightSlide < lowBarClearance`, `stickReleaseThreshold < stickThreshold`). These exist so a bad edit fails loudly instead of quietly breaking feel.
+
+---
+
+## 16. Audio — P11
+
+All times here are **wall-clock seconds on the `AudioContext` clock**, not sim seconds. That
+distinction is the reason audio schedules against `AudioContext.currentTime` rather than the
+tick counter: the sim clock is a fiction the audio hardware has never heard of.
+
+Everything in this section is presentation. Nothing here may change a run's outcome.
+
+### 16.1 Buses
+
+| Name | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `masterGain` | x | **0.9** | 0 – 1 | ⚙️ | Everything is quiet and players raise system volume, which then blasts them elsewhere. | A full mix plus a shatter burst clips at the destination. |
+| `musicGain` | x | **0.6** | 0 – 1 | ⚙️ | Music becomes decoration nobody notices. | Music masks the crash that ended the run. Music sits **under** gameplay: every sound that tells the player something must win against it. |
+| `sfxGain` | x | **0.85** | 0 – 1 | ⚙️ | Feedback stops registering as impact. | Constant events (coins, near-misses) become fatiguing. |
+| `uiGain` | x | **0.7** | 0 – 1 | ⚙️ | Theme and band changes go unnoticed. | Ambient information competes with gameplay. |
+
+### 16.2 Voice pool
+
+| Name | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `maxVoices` | count | **24** | 8 – 64 | ⚙️ | Voices get stolen during ordinary play and feedback goes missing. Band-5 plus a shatter burst peaks near 14. | Wasted graph. Beyond ~24 the ear cannot separate them anyway. |
+| `voiceStealFade` | s | **0.006** | 0.002 – 0.02 | 🔒 | The steal is a hard `stop()`, which truncates the waveform mid-cycle — a step discontinuity, i.e. a click. | The replacement sound is audibly late. |
+
+### 16.3 The musical grid
+
+One tempo for the whole project. Every theme is written to it, so a theme cross-fade at a
+distance milestone lands on a beat instead of smearing across one.
+
+| Name | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `musicBpm` | bpm | **126** | 100 – 150 | ⚙️ | Fast enough to carry a runner; slow enough that percussion is not a wash at Overdrive speed. **The rendered tempo differs by ~0.00008%** — see below. |
+| `beatsPerBar` | count | **4** | — | 🔒 | Changing this re-authors every stem pattern in `recipes.ts`. |
+| `barsPerLoop` | count | **4** | 2 – 8 | ⚙️ | Shorter loops audibly repeat; longer ones cost render time and memory per theme. |
+| `stemTailSeconds` | s | **1.5** | 0.5 – 3 | ⚙️ | Must exceed the longest stem hit's duration, or that decay is truncated at the render length and clicks. Asserted in `tests/audio/synth.test.ts`. |
+
+> **The tempo bends to the sample rate, not the other way round.** A loop buffer is a whole
+> number of samples, so the rendered loop is `round(ideal × sampleRate)` samples and its true
+> duration is `loopSamples / sampleRate` — 5.95µs short of the ideal at 126bpm / 48kHz. Bars
+> and beats are derived by **dividing that real loop**, so they tile it exactly. Deriving them
+> from `60 / bpm` instead would put every bar boundary a fraction of a sample off the actual
+> musical bar and compound it: 22 samples off the downbeat 78 loops into a ten-minute run.
+> That is drift, reintroduced through the back door of a division. The cost of avoiding it is
+> a tempo shift of about a thousandth of a cent.
+
+### 16.4 Adaptive layering
+
+Intensity is a blend of the two things the player is actually feeling: how fast the world is
+moving, and how close they are to Overdrive.
+
+| Name | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `musicSpeedWeight` | x | **0.45** | 0 – 1 | ⚙️ | Music ignores the speed the player is fighting. | Music tracks speed so tightly it stops responding to skill. |
+| `musicFlowWeight` | x | **0.55** | 0 – 1 | ⚙️ | The build toward Overdrive is inaudible. | Layers pump on every small Flow change. |
+| `percussionOnset` | x | **0.18** | 0 – 1 | ⚙️ | Percussion is present from the first second and has nowhere to go. | The opening minute is bare. |
+| `percussionFull` | x | **0.45** | 0 – 1 | ⚙️ | — | Percussion never reaches full in a short run. |
+| `tensionOnset` | x | **0.5** | 0 – 1 | ⚙️ | Tension arrives before it has been earned. | — |
+| `tensionFull` | x | **0.9** | 0 – 1 | ⚙️ | — | Only reachable moments before Overdrive fires anyway. |
+| `layerFade` | s | **0.9** | 0.3 – 2 | ⚙️ | A layer snapping in reads as a bug. The whole point is that the player never catches it changing. | The music lags the game state by a bar. |
+| `layerEpsilon` | x | **0.02** | 0.005 – 0.1 | 🔒 | The frame loop queues an automation event 60×/s for changes of 0.001 — real CPU, and zipper artifacts. | Layer changes arrive in visible steps. |
+| `themeFade` | s | **2.0** | 1 – 4 | ⚙️ | The theme swap is a cut. | Longer than the 120m transition tunnel, so the fade outlives the calm it belongs to. |
+| `overdriveFade` | s | **0.12** | 0.05 – 0.4 | ⚙️ | — | The swap stops reading as a cut, which is the effect. |
+| `overdriveLayerDuck` | x | **0.75** | 0.4 – 1 | ⚙️ | Overdrive does not feel like a different place. | At 1.0 the groove vanishes and the exit sounds like the music restarted. Never to zero. |
+
+### 16.5 Side-chain ducking
+
+| Name | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `duckAttack` | s | **0.008** | 0.003 – 0.02 | 🔒 | The gain change is itself a click. | The duck has not cleared the way before the transient it exists for arrives. |
+| `duckRelease` | s | **0.18** | 0.08 – 0.4 | 🔒 | The music jumps back and reads as a glitch. | The mix breathes visibly — the pumping that gives side-chaining a bad name. Note this is a *duration to ~95% recovered*; the implementation divides by 3 to get `setTargetAtTime`'s time constant. |
+| `duckDepth` | x | **0.3** | 0.1 – 0.6 | ⚙️ | Impacts do not cut through. | Music disappears on every coin. |
+| `duckMaxDepth` | x | **0.6** | 0.3 – 0.9 | 🔒 | — | A shatter burst drives the music bus to silence and the ducking becomes a mute button. Dips **coalesce** rather than stacking; the loudest sound in a cluster owns the duck. |
+
+### 16.6 One-shot humanisation
+
+The single cheapest thing that stops repeated sounds sounding like a sample player.
+
+| Name | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `pitchJitter` | x | **0.08** | 0.02 – 0.15 | 🔒 | The ear recognises the waveform, and every later repeat is heard as "the sound file" rather than as the event. | Roughly a semitone and a third is the ceiling before sounds drift out of tune with the music. |
+| `gainJitter` | x | **0.06** | 0.02 – 0.12 | ⚙️ | — | Loudness becomes unreliable as a signal of severity. |
+
+### 16.7 The coin streak ladder
+
+Successive pickups climb in pitch and drop back on a break. **This is the bit-streak HUD** —
+it teaches the whole system with no UI element, because the player hears the pitch rise, hears
+it reset when they miss, and works out what they did.
+
+| Name | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `coinStreakSemitone` | semitones | **1** | 1 – 3 | ⚙️ | The climb is imperceptible. | The ladder leaves the musical range in four pickups. |
+| `coinStreakMax` | semitones | **12** | 5 – 24 | ⚙️ | The ceiling arrives before the player notices the mechanic. | A long streak disappears upward into a whistle. |
+| `coinStreakResetSeconds` | s | **2.5** | 1 – 5 | ⚙️ | Ordinary gaps between clusters read as breaks. | A genuine break goes unheard. The sim emits no "streak broken" event — a gap **is** the break as the player experiences it. |
+
+### 16.8 Latency
+
+| Name | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `scheduleAhead` | s | **0.02** | 0.005 – 0.1 | 🔒 | A floor, not a preference. Scheduling at exactly `currentTime` races the render quantum, and the loser is the head of the sound — for a percussive one-shot, the entire transient. |
+| `latencyOffsetMin` | s | **-0.15** | — | ⚙️ | **A negative offset can only give back the scheduling lead; it clamps at zero.** Sound cannot be scheduled in the past, so a player on Bluetooth headphones hearing everything 200ms late cannot be fixed by this slider — and the settings screen must not imply otherwise. |
+| `latencyOffsetMax` | s | **0.25** | — | ⚙️ | The direction that genuinely works: delaying audio to match a display that is itself buffered. |
+
+### 16.9 Lifecycle
+
+| Name | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `masterFadeIn` | s | **0.4** | 0.1 – 1 | ⚙️ | Starting at full gain on the first sample is a click and a jump-scare. |
+| `suspendFade` | s | **0.06** | 0.02 – 0.2 | ⚙️ | Fade before suspending on tab hide, and back after resuming. |
+| `channels` | count | **2** | — | 🔒 | Output channels for every rendered buffer. |
+
+### 16.10 Audio budgets
+
+| Budget | Limit | Enforced by |
+|---|---|---|
+| Stem drift over 2 minutes | **0 samples** | `tests/e2e/audio.spec.ts` — renders 120s offline, compares the last loop against the first sample-for-sample |
+| Click at a loop seam | **< 0.25** step | Same, scanning the real stem buffers |
+| Audio graph CPU | **< 3%** | Same, as offline-render-time ÷ rendered-duration. A **proxy**, labelled as one — it measures the graph, not the audio thread's share of a frame. |
+| `<audio>` elements | **0** | Same, asserted against the live DOM |
+| Concurrent voices | **≤ `maxVoices`** | Same, over 60s of real play |
 </content>

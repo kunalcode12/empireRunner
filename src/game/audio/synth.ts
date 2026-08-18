@@ -44,6 +44,7 @@ import type { DroneLayer, SoundRecipe, StemRecipe } from "./recipes";
 
 /** The shared musical grid. Every stem in every theme is rendered against it. */
 export interface MusicGrid {
+  /** bpm — the tempo actually rendered, after sample-rate snapping. */
   bpm: number;
   beatsPerBar: number;
   barsPerLoop: number;
@@ -51,7 +52,7 @@ export interface MusicGrid {
   beatSeconds: number;
   /** s — one bar. Overdrive swaps quantise to this. */
   barSeconds: number;
-  /** s — one full stem loop. */
+  /** s — one full stem loop. Exactly `loopSamples / sampleRate`. */
   loopSeconds: number;
   /** samples — the loop, as an exact integer at this sample rate. */
   loopSamples: number;
@@ -75,26 +76,48 @@ export function beatSeconds(bpm: number): number {
   return SECONDS_PER_MINUTE / bpm;
 }
 
-/** Builds the grid for a sample rate. Pure. */
+/**
+ * Builds the grid for a sample rate. Pure.
+ *
+ * ## The tempo bends to the sample rate, not the other way round
+ *
+ * A loop buffer is a whole number of samples — there is no such thing as a
+ * 365,714.28-sample buffer. So the rendered loop is `round(ideal * sampleRate)`
+ * samples, and its true duration is `loopSamples / sampleRate`, which at 126bpm
+ * and 48kHz is 5.95 microseconds shorter than the ideal 7.619047s.
+ *
+ * Everything downstream must use that *true* duration rather than the ideal, and
+ * this is not a rounding nicety. `music.ts` computes bar boundaries as
+ * `startTime + n * barSeconds`. If `barSeconds` came from the ideal tempo, every
+ * bar boundary would sit a fraction of a sample away from the actual musical bar
+ * in the buffer, and the error would compound: 78 loops into a ten-minute run
+ * the Overdrive swap would land 22 samples off the downbeat. That is the exact
+ * class of drift this design exists to eliminate, reintroduced through the back
+ * door of a `60 / bpm` division.
+ *
+ * So the bar and beat are derived by *dividing the real loop*, which tiles it
+ * exactly by construction. The cost is a tempo shift of about 0.00008% —
+ * roughly a thousandth of a cent, and unmeasurable by any means available to a
+ * listener.
+ */
 export function createGrid(sampleRate: number): MusicGrid {
-  const bpm = TUNING.audio.musicBpm;
   const beatsPerBar = TUNING.audio.beatsPerBar;
   const barsPerLoop = TUNING.audio.barsPerLoop;
-  const beat = beatSeconds(bpm);
-  const bar = beat * beatsPerBar;
-  const loop = bar * barsPerLoop;
+  const idealLoop = beatSeconds(TUNING.audio.musicBpm) * beatsPerBar * barsPerLoop;
+
+  const loopSamples = Math.round(idealLoop * sampleRate);
+  const loop = loopSamples / sampleRate;
+  const bar = loop / barsPerLoop;
+  const beat = bar / beatsPerBar;
+
   return {
-    bpm,
+    bpm: SECONDS_PER_MINUTE / beat,
     beatsPerBar,
     barsPerLoop,
     beatSeconds: beat,
     barSeconds: bar,
     loopSeconds: loop,
-    // Rounded to an exact sample count. A fractional loop length would make the
-    // buffer's true duration differ from `loopSeconds` by a fraction of a
-    // sample, and stems started at different times would then disagree by that
-    // fraction — the drift this whole design exists to prevent.
-    loopSamples: Math.round(loop * sampleRate),
+    loopSamples,
     sampleRate,
   };
 }
@@ -173,7 +196,13 @@ function createNoiseBuffer(context: BaseAudioContext): AudioBuffer {
  * approach zero, and leaving the node at a tiny non-zero gain leaks the
  * oscillator's tail into everything that follows.
  */
-function envelope(param: AudioParam, at: number, peak: number, attack: number, decay: number): void {
+function envelope(
+  param: AudioParam,
+  at: number,
+  peak: number,
+  attack: number,
+  decay: number,
+): void {
   const attackEnd = at + attack;
   const end = attackEnd + decay;
   param.setValueAtTime(0, at);

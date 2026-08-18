@@ -188,9 +188,7 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
       { wave: "sine", freq: 659.3, gain: 0.3, attack: 0.01, decay: 0.45 },
       { wave: "sine", freq: 987.8, gain: 0.18, attack: 0.02, decay: 0.5, start: 0.04 },
     ],
-    noises: [
-      { gain: 0.12, attack: 0.001, decay: 0.18, filter: "highpass", cutoff: 3200, q: 0.7 },
-    ],
+    noises: [{ gain: 0.12, attack: 0.001, decay: 0.18, filter: "highpass", cutoff: 3200, q: 0.7 }],
   },
 
   /** Shards are the premium currency. Glassy, and it rings. */
@@ -204,9 +202,7 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
       { wave: "sine", freq: 2093, gain: 0.22, attack: 0.001, decay: 0.7, detune: 8 },
       { wave: "triangle", freq: 3135.9, gain: 0.12, attack: 0.001, decay: 0.45 },
     ],
-    noises: [
-      { gain: 0.1, attack: 0.001, decay: 0.12, filter: "bandpass", cutoff: 6000, q: 2 },
-    ],
+    noises: [{ gain: 0.1, attack: 0.001, decay: 0.12, filter: "bandpass", cutoff: 6000, q: 2 }],
   },
 
   /**
@@ -262,9 +258,7 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
     bus: Bus.Sfx,
     pan: 0,
     tones: [{ wave: "sine", freq: 150, freqEnd: 62, gain: 0.55, attack: 0.001, decay: 0.19 }],
-    noises: [
-      { gain: 0.3, attack: 0.001, decay: 0.14, filter: "lowpass", cutoff: 1800, q: 0.6 },
-    ],
+    noises: [{ gain: 0.3, attack: 0.001, decay: 0.14, filter: "lowpass", cutoff: 1800, q: 0.6 }],
   },
 
   /** Slide entry — a scrape that opens up. */
@@ -343,9 +337,7 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
     bus: Bus.Sfx,
     pan: 0,
     tones: [{ wave: "triangle", freq: 130.8, gain: 0.4, attack: 0.001, decay: 0.16 }],
-    noises: [
-      { gain: 0.22, attack: 0.001, decay: 0.09, filter: "lowpass", cutoff: 2400, q: 0.7 },
-    ],
+    noises: [{ gain: 0.22, attack: 0.001, decay: 0.09, filter: "lowpass", cutoff: 2400, q: 0.7 }],
   },
 
   /** Lane change. Very small — this happens constantly. */
@@ -434,7 +426,15 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
     bus: Bus.Sfx,
     pan: 0,
     tones: [
-      { wave: "square", freq: 523.3, gain: 0.2, attack: 0.001, decay: 0.35, fmRatio: 1.41, fmIndex: 2.2 },
+      {
+        wave: "square",
+        freq: 523.3,
+        gain: 0.2,
+        attack: 0.001,
+        decay: 0.35,
+        fmRatio: 1.41,
+        fmIndex: 2.2,
+      },
       { wave: "sine", freq: 261.6, gain: 0.3, attack: 0.001, decay: 0.5 },
     ],
     noises: [
@@ -463,7 +463,15 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
     pan: 0,
     tones: [
       { wave: "sawtooth", freq: 110, freqEnd: 220, gain: 0.3, attack: 0.01, decay: 0.5 },
-      { wave: "sawtooth", freq: 164.8, freqEnd: 329.6, gain: 0.25, attack: 0.02, decay: 0.6, detune: 6 },
+      {
+        wave: "sawtooth",
+        freq: 164.8,
+        freqEnd: 329.6,
+        gain: 0.25,
+        attack: 0.02,
+        decay: 0.6,
+        detune: 6,
+      },
       { wave: "square", freq: 440, gain: 0.16, attack: 0.06, decay: 0.9, start: 0.12 },
       { wave: "sine", freq: 880, gain: 0.12, attack: 0.08, decay: 1, start: 0.18 },
     ],
@@ -500,7 +508,15 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
     bus: Bus.Sfx,
     pan: 0,
     tones: [
-      { wave: "square", freq: 784, gain: 0.12, attack: 0.001, decay: 0.09, fmRatio: 2.7, fmIndex: 4 },
+      {
+        wave: "square",
+        freq: 784,
+        gain: 0.12,
+        attack: 0.001,
+        decay: 0.09,
+        fmRatio: 2.7,
+        fmIndex: 4,
+      },
     ],
     noises: [
       {
@@ -533,9 +549,7 @@ export const SOUNDS: Readonly<Record<SoundKey, SoundRecipe>> = Object.freeze({
       { wave: "sine", freq: 155.6, gain: 0.24, attack: 0.02, decay: 1.1, detune: 14 },
       { wave: "triangle", freq: 466.2, gain: 0.12, attack: 0.05, decay: 0.9 },
     ],
-    noises: [
-      { gain: 0.18, attack: 0.02, decay: 1.1, filter: "bandpass", cutoff: 320, q: 3 },
-    ],
+    noises: [{ gain: 0.18, attack: 0.02, decay: 1.1, filter: "bandpass", cutoff: 320, q: 3 }],
   },
 
   /** The right verb, in time. Release and reward. */
@@ -715,11 +729,35 @@ const CLANK: SoundRecipe = {
   bus: Bus.Music,
   pan: 0.2,
   tones: [
-    { wave: "square", freq: 621, gain: 0.1, attack: 0.001, decay: 0.11, fmRatio: 1.73, fmIndex: 3.1 },
-    { wave: "square", freq: 933, gain: 0.06, attack: 0.001, decay: 0.07, fmRatio: 2.41, fmIndex: 2.2 },
+    {
+      wave: "square",
+      freq: 621,
+      gain: 0.1,
+      attack: 0.001,
+      decay: 0.11,
+      fmRatio: 1.73,
+      fmIndex: 3.1,
+    },
+    {
+      wave: "square",
+      freq: 933,
+      gain: 0.06,
+      attack: 0.001,
+      decay: 0.07,
+      fmRatio: 2.41,
+      fmIndex: 2.2,
+    },
   ],
   noises: [
-    { gain: 0.3, attack: 0.001, decay: 0.16, filter: "bandpass", cutoff: 3100, cutoffEnd: 1900, q: 1.6 },
+    {
+      gain: 0.3,
+      attack: 0.001,
+      decay: 0.16,
+      filter: "bandpass",
+      cutoff: 3100,
+      cutoffEnd: 1900,
+      q: 1.6,
+    },
   ],
 };
 
@@ -730,7 +768,15 @@ const RIM: SoundRecipe = {
   pan: -0.25,
   tones: [{ wave: "triangle", freq: 440, freqEnd: 320, gain: 0.16, attack: 0.001, decay: 0.06 }],
   noises: [
-    { gain: 0.34, attack: 0.001, decay: 0.4, filter: "bandpass", cutoff: 2100, cutoffEnd: 900, q: 2.4 },
+    {
+      gain: 0.34,
+      attack: 0.001,
+      decay: 0.4,
+      filter: "bandpass",
+      cutoff: 2100,
+      cutoffEnd: 900,
+      q: 2.4,
+    },
   ],
 };
 
@@ -764,9 +810,7 @@ const HAND_PERC: SoundRecipe = {
   bus: Bus.Music,
   pan: 0.3,
   tones: [{ wave: "sine", freq: 196, freqEnd: 130, gain: 0.3, attack: 0.001, decay: 0.12 }],
-  noises: [
-    { gain: 0.26, attack: 0.001, decay: 0.1, filter: "bandpass", cutoff: 1600, q: 1.1 },
-  ],
+  noises: [{ gain: 0.26, attack: 0.001, decay: 0.1, filter: "bandpass", cutoff: 1600, q: 1.1 }],
 };
 
 const CLOCK_TICK: SoundRecipe = {
@@ -775,9 +819,7 @@ const CLOCK_TICK: SoundRecipe = {
   bus: Bus.Music,
   pan: 0.1,
   tones: [{ wave: "square", freq: 1245, gain: 0.06, attack: 0.001, decay: 0.02 }],
-  noises: [
-    { gain: 0.24, attack: 0.001, decay: 0.05, filter: "bandpass", cutoff: 4400, q: 3.2 },
-  ],
+  noises: [{ gain: 0.24, attack: 0.001, decay: 0.05, filter: "bandpass", cutoff: 4400, q: 3.2 }],
 };
 
 const FM_LEAD: SoundRecipe = {
@@ -786,8 +828,25 @@ const FM_LEAD: SoundRecipe = {
   bus: Bus.Music,
   pan: 0,
   tones: [
-    { wave: "sine", freq: 329.6, gain: 0.18, attack: 0.01, decay: 0.6, fmRatio: 1.98, fmIndex: 3.4 },
-    { wave: "sine", freq: 329.6, gain: 0.1, attack: 0.02, decay: 0.5, detune: 22, fmRatio: 2.02, fmIndex: 2.8 },
+    {
+      wave: "sine",
+      freq: 329.6,
+      gain: 0.18,
+      attack: 0.01,
+      decay: 0.6,
+      fmRatio: 1.98,
+      fmIndex: 3.4,
+    },
+    {
+      wave: "sine",
+      freq: 329.6,
+      gain: 0.1,
+      attack: 0.02,
+      decay: 0.5,
+      detune: 22,
+      fmRatio: 2.02,
+      fmIndex: 2.8,
+    },
   ],
   noises: [],
 };
@@ -820,13 +879,19 @@ export const THEME_STEMS: readonly ThemeStems[] = Object.freeze([
       gain: 0.85,
       drones: [],
       patterns: [
-        { hit: CLANK, beats: [1, 3.5, 5, 7, 9, 11.5, 13, 15], accents: [1, 0.6, 0.85, 0.7, 1, 0.6, 0.9, 0.75] },
+        {
+          hit: CLANK,
+          beats: [1, 3.5, 5, 7, 9, 11.5, 13, 15],
+          accents: [1, 0.6, 0.85, 0.7, 1, 0.6, 0.9, 0.75],
+        },
         { hit: KICK, beats: [3.5, 11.5], accents: [0.55, 0.55] },
       ],
     },
     tension: {
       gain: 0.75,
-      drones: [{ wave: "square", freq: 110, gain: 0.035, cutoff: 900, lfoCycles: 2, lfoDepth: 0.5 }],
+      drones: [
+        { wave: "square", freq: 110, gain: 0.035, cutoff: 900, lfoCycles: 2, lfoDepth: 0.5 },
+      ],
       patterns: [{ hit: BRASS_STAB, beats: [0, 6, 8, 14], accents: [1, 0.7, 1, 0.8] }],
     },
     overdrive: {
@@ -834,7 +899,12 @@ export const THEME_STEMS: readonly ThemeStems[] = Object.freeze([
       drones: [{ wave: "sawtooth", freq: 110, gain: 0.07, cutoff: 1600 }],
       patterns: [
         { hit: KICK, beats: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] },
-        { hit: CLANK, beats: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5] },
+        {
+          hit: CLANK,
+          beats: [
+            0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5,
+          ],
+        },
         { hit: BRASS_STAB, beats: [0, 4, 8, 12] },
       ],
     },
@@ -879,7 +949,9 @@ export const THEME_STEMS: readonly ThemeStems[] = Object.freeze([
     name: "Bazaar",
     base: {
       gain: 0.9,
-      drones: [{ wave: "sawtooth", freq: 73.4, gain: 0.08, cutoff: 420, lfoCycles: 2, lfoDepth: 0.2 }],
+      drones: [
+        { wave: "sawtooth", freq: 73.4, gain: 0.08, cutoff: 420, lfoCycles: 2, lfoDepth: 0.2 },
+      ],
       patterns: [
         {
           hit: OUD,
@@ -894,21 +966,35 @@ export const THEME_STEMS: readonly ThemeStems[] = Object.freeze([
       patterns: [
         {
           hit: HAND_PERC,
-          beats: [0, 0.75, 2, 2.75, 3.5, 4, 4.75, 6, 6.75, 7.5, 8, 8.75, 10, 10.75, 11.5, 12, 12.75, 14, 14.75, 15.5],
-          accents: [1, 0.5, 0.8, 0.5, 0.6, 1, 0.5, 0.8, 0.5, 0.6, 1, 0.5, 0.8, 0.5, 0.6, 1, 0.5, 0.8, 0.5, 0.6],
+          beats: [
+            0, 0.75, 2, 2.75, 3.5, 4, 4.75, 6, 6.75, 7.5, 8, 8.75, 10, 10.75, 11.5, 12, 12.75, 14,
+            14.75, 15.5,
+          ],
+          accents: [
+            1, 0.5, 0.8, 0.5, 0.6, 1, 0.5, 0.8, 0.5, 0.6, 1, 0.5, 0.8, 0.5, 0.6, 1, 0.5, 0.8, 0.5,
+            0.6,
+          ],
         },
       ],
     },
     tension: {
       gain: 0.7,
-      drones: [{ wave: "square", freq: 220, gain: 0.025, cutoff: 1100, lfoCycles: 4, lfoDepth: 0.7 }],
+      drones: [
+        { wave: "square", freq: 220, gain: 0.025, cutoff: 1100, lfoCycles: 4, lfoDepth: 0.7 },
+      ],
       patterns: [{ hit: FM_LEAD, beats: [2, 10], accents: [0.8, 0.8] }],
     },
     overdrive: {
       gain: 1,
       drones: [{ wave: "sawtooth", freq: 146.8, gain: 0.06, cutoff: 1800 }],
       patterns: [
-        { hit: HAND_PERC, beats: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5] },
+        {
+          hit: HAND_PERC,
+          beats: [
+            0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10,
+            10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5,
+          ],
+        },
         { hit: OUD, beats: [0, 2, 4, 6, 8, 10, 12, 14] },
       ],
     },
@@ -938,14 +1024,22 @@ export const THEME_STEMS: readonly ThemeStems[] = Object.freeze([
     },
     tension: {
       gain: 0.75,
-      drones: [{ wave: "sawtooth", freq: 164.8, gain: 0.03, cutoff: 1300, lfoCycles: 5, lfoDepth: 0.8 }],
+      drones: [
+        { wave: "sawtooth", freq: 164.8, gain: 0.03, cutoff: 1300, lfoCycles: 5, lfoDepth: 0.8 },
+      ],
       patterns: [{ hit: FM_LEAD, beats: [0, 3, 8, 11], accents: [1, 0.6, 1, 0.6] }],
     },
     overdrive: {
       gain: 1,
       drones: [{ wave: "square", freq: 82.4, gain: 0.05, cutoff: 2000 }],
       patterns: [
-        { hit: CLOCK_TICK, beats: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5] },
+        {
+          hit: CLOCK_TICK,
+          beats: [
+            0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10,
+            10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5,
+          ],
+        },
         { hit: FM_LEAD, beats: [0, 2, 4, 6, 8, 10, 12, 14] },
       ],
     },

@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TUNING } from "@/game/config/tuning";
 import { createVoicePool } from "@/game/audio/voices";
-import {
-  FakeAudioContext,
-  asAudioBuffer,
-  asBaseContext,
-  asGainNode,
-} from "../helpers/fake-audio";
+import { FakeAudioContext, asAudioBuffer, asBaseContext, asGainNode } from "../helpers/fake-audio";
 
 function pool(capacity: number): {
   context: FakeAudioContext;

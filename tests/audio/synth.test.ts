@@ -16,17 +16,30 @@ describe("the musical grid", () => {
   it("derives from one tempo across every sample rate", () => {
     for (const rate of RATES) {
       const grid = createGrid(rate);
-      expect(grid.bpm).toBe(TUNING.audio.musicBpm);
-      expect(grid.beatSeconds).toBeCloseTo(beatSeconds(TUNING.audio.musicBpm), 12);
       expect(Number.isInteger(grid.loopSamples)).toBe(true);
+      // The tempo bends to the sample rate rather than the other way round, so
+      // it is not exactly the authored bpm — but the shift is about a
+      // thousandth of a cent and no listener can measure it.
+      const cents = 1200 * Math.log2(grid.beatSeconds / beatSeconds(TUNING.audio.musicBpm));
+      expect(Math.abs(cents)).toBeLessThan(0.01);
     }
   });
 
-  it("a loop is an exact number of samples", () => {
+  /**
+   * Load-bearing. `music.ts` computes bar boundaries as `startTime + n * bar`,
+   * so a bar that does not exactly tile the rendered loop puts every boundary a
+   * fraction of a sample out and compounds it — 22 samples off the downbeat 78
+   * loops into a ten-minute run.
+   */
+  it("bars tile the rendered loop exactly", () => {
     for (const rate of RATES) {
       const grid = createGrid(rate);
-      // Within half a sample of the ideal duration, by construction.
-      expect(Math.abs(grid.loopSamples - grid.loopSeconds * rate)).toBeLessThanOrEqual(0.5);
+      expect(grid.loopSeconds).toBe(grid.loopSamples / rate);
+      expect(grid.barSeconds * grid.barsPerLoop).toBe(grid.loopSeconds);
+      expect(grid.beatSeconds * grid.beatsPerBar).toBeCloseTo(grid.barSeconds, 15);
+      // Zero, not "within half a sample": the loop duration is defined by the
+      // sample count rather than approximating it.
+      expect(Math.abs(grid.loopSamples - grid.loopSeconds * rate)).toBe(0);
     }
   });
 });
