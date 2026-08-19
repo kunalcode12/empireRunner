@@ -615,3 +615,88 @@ the damage listed in `repairs`. The worst available outcome is losing one field'
 Remote sync compares **lifetime distance**, which is monotonic, rather than timestamps. Device
 clocks are wrong often enough that a timestamp comparison would let a misconfigured phone
 overwrite real progress.
+
+---
+
+## 18. UI — P14
+
+Everything here is presentation. **Nothing in this section may change a run's outcome.**
+
+### 18.1 The motion scale, in sim ticks
+
+Every UI duration is authored as a whole number of 60Hz ticks and converted once, in
+`src/ui/motion.ts`. Two of them are **borrowed rather than chosen**, which is what the
+brief's "on the same clock as the game" actually means:
+
+| Key | Ticks | ms | Status | Notes |
+|---|---|---|---|---|
+| `instantTicks` | **3** | 50 | ⚙️ | Hover, press, focus. Below ~40ms nobody perceives it. |
+| `fastTicks` | **6** | 100 | 🔧 | Equals `coyoteTime`. |
+| `baseTicks` | **12** | 200 | ⚙️ | The default for anything that moves more than a few pixels. |
+| `screenTicks` | **18** | 300 | 🔧 | **Equals `rollDuration`.** A screen transition takes exactly as long as the roll the player already has in their hands, on the roll's own easing curve. |
+| `slowTicks` | **33** | 550 | 🔧 | **Equals `slideDuration`.** |
+| `registerLeadTicks` | **2** | 33 | ⚙️ | How far the incoming screen's key-line layer leads its colour layer during a wipe. |
+| `registerOffsetPx` | **3** | — | ⚙️ | How far off register it sits while leading. A two-colour screen print is never in perfect register; this is that tell, and it is the reason the transition does not read as a generic slide. |
+
+Easings are the sim's own curves, reused rather than re-picked: `easeOutCubic` (the lane
+tween) and `easeInOutCubic` (the roll). `tests/ui/tokens.test.ts` asserts the tick counts are
+integers and that the two borrowed durations still match their verbs — so retuning `rollDuration`
+either updates the UI or fails the suite.
+
+### 18.2 The AXIS ring — the Flow meter
+
+| Key | Unit | Default | Range | Status | Too low | Too high |
+|---|---|---|---|---|---|---|
+| `ringSizeDesktop` | px | **112** | 88 – 160 | ⚙️ | Unreadable in peripheral vision, which is the one thing it must do. | Dominates a HUD that is meant to be minimal. |
+| `ringSizeMobile` | px | **88** | 56 – 120 | ⚙️ | **Hard floor 56** — the ring is also the Overdrive button on touch (§6.2). | Eats the thumb zone the player needs for gestures. |
+| `ringStroke` | px | **6** | 4 – 10 | ⚙️ | Thinner than the 2–3px key-line the rest of the art uses and it stops reading as ink. | The square's interior disappears. |
+| `ringStrokeFull` | px | **10** | — | ⚙️ | Must exceed `ringStroke`. This is how "ready to spend" is signalled: **weight, not glow.** §11.3 permits emission only inside Overdrive, and that constraint produced a better answer than a glow would have. |
+| `ringKickScale` | × | **1.12** | 1.05 – 1.3 | ⚙️ | A near-miss does not register. | The HUD bounces on every graze; at 60 near-misses a run it never stops. |
+| `ringKickTicks` | ticks | **6** | 3 – 12 | ⚙️ | The kick is a flicker. | It is still decaying when the next near-miss lands. |
+| `ringPulseScale` | × | **1.04** | 1.01 – 1.08 | ⚙️ | The full meter does not ask to be spent. | Must stay **under `ringKickScale`**, or a near-miss at 100 Flow is invisible under the breathing. Asserted. |
+
+The at-100 pulse period is **one musical bar**, derived arithmetically from `TUNING.audio`
+(`60 / musicBpm × beatsPerBar` = 1.905s at the shipped values) rather than read from the audio
+layer — so the meter breathes in time with the track without `src/ui/` depending on Web Audio.
+
+### 18.3 HUD
+
+| Key | Unit | Default | Range | Status | Notes |
+|---|---|---|---|---|---|
+| `hudPushHz` | Hz | **15** | 10 – 20 | 🔒 | A ceiling on **DOM writes**, not on the sim. ARCHITECTURE §3.1: the eye cannot read a number changing at 60Hz and writing one costs real layout work. Bit pickups bypass the gate — a coin that lands and does not move the counter for 66ms reads as a missed pickup. |
+| `odometerRollTicks` | ticks | **8** | 4 – 16 | ⚙️ | The digit teleports. Above ~16 it is still rolling when the next value arrives and the counter smears. |
+| `odometerMaxDigits` | count | **7** | 5 – 9 | ⚙️ | Capacity. Past it the counter pins to all-nines rather than truncating — showing `0,000,000` for ten million would be a *smaller* number than the one before it. |
+| `flowPopupPool` | count | **8** | 4 – 16 | ⚙️ | Awards are dropped during a dense cluster. Pooled because §9.1 has a challenge for **60 near-misses in one run**, so sixty is a design target, not a worst case. |
+| `flowPopupTicks` | ticks | **45** | 20 – 90 | ⚙️ | The `+6` is gone before it is read. |
+| `flowPopupDriftPx` | px | **56** | 20 – 120 | ⚙️ | How far it travels before recycling. |
+
+### 18.4 Death screen
+
+| Key | Unit | Default | Status | Notes |
+|---|---|---|---|---|
+| `deathBeatTicks` | ticks | **12** | ⚙️ | Gap between the five beats. The whole sequence must fit inside two seconds — an arcade player retries in under that, and any input skips to the end. |
+| `deathCountTicks` | ticks | **33** | ⚙️ | The score count-up. Must finish before the actions appear, or RETRY takes focus while the hero number is still climbing. Asserted. |
+
+**The order is load-bearing and is tested.** Score → personal best → **mission near-miss** →
+Bits → retry. §9.4 calls the near-miss line a required element and says it does more for D2
+retention than any reward in the game; it only does that if it lands while the loss still
+stings. Putting the Bits first turns the sting into a receipt.
+
+### 18.5 Layout and colour
+
+| Key | Unit | Default | Status | Notes |
+|---|---|---|---|---|
+| `minTargetPx` | px | **44** | 🔒 | WCAG 2.2 AA asks 24. 44 is the platform convention and the honest floor for a thumb at speed. |
+| `mobileBreakpointPx` | px | **720** | ⚙️ | The layout is designed and screenshot-tested at **375px**. |
+| `sliderSteps` | count | **20** | ⚙️ | Settings sliders are 20 discrete plates. A continuous track needs a gradient or a soft thumb and §11.1 permits neither; 20 flat cells also makes the value countable. |
+| `halftonePitchPx` | px | **4** | ⚙️ | Dot pitch. Anchored to the **viewport**, not to any element, so the grain does not swim when a screen slides under it — §11.1. |
+| `uiContrastMin` | × | **4.5** | 🔒 | Recomputed from the theme hex values in `tests/ui/contrast.test.ts`. |
+| `uiCommitsDuringRun` | count | **0** | 🔒 | React renders permitted in the UI tree during a run. A hard zero: one `setState` in the frame path re-renders the HUD 60×/s and there is no such thing as a little bit of that. |
+
+**The theme palettes are art-direction palettes, not UI palettes.** Recomputing every
+combination found six pairs that fail AA — Kiln's ember on gunmetal at 3.83:1, Bazaar's ochre on
+indigo at 4.19:1, and four more. `config/themes.ts` therefore declares which entries are
+text-safe against which ground; the rest are **structural** and legal only as fills, rules and
+ink. Two themes cannot fill a second text role at all and declare `null` rather than shipping a
+4.19:1 label. Inside a raised plate the dim role resolves to the primary text colour: **a plate
+carries two inks, not three**, and hierarchy is carried by size, weight and tracking.

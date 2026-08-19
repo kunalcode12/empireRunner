@@ -1347,7 +1347,106 @@ export const TUNING = {
   },
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 16. Enforced budgets — docs/TUNING.md §14
+  // 16. UI — docs/TUNING.md §18, P14
+  //
+  // Presentation only. Nothing here may change a run's outcome.
+  //
+  // ## Every duration is a whole number of sim ticks
+  //
+  // The brief asked for screen transitions "on the same clock as the game", and
+  // the game's clock is the 60Hz fixed tick. So the motion scale is expressed in
+  // ticks and converted to milliseconds by one derived expression, which means a
+  // UI animation can never land on a fractional frame boundary.
+  //
+  // Two of them are borrowed rather than invented: `screenTicks` is 18, which is
+  // `rollDuration` exactly, and `slowTicks` is 33, which is `slideDuration`. A
+  // screen change therefore takes precisely as long as the roll the player
+  // already has in their hands, on the same easing curve. Asserted in
+  // `tests/ui/tokens.test.ts` so it stays true if either verb is retuned.
+  // ───────────────────────────────────────────────────────────────────────────
+  ui: {
+    // ── Motion scale, in ticks ──────────────────────────────────────────────
+    /** ticks — the shortest perceptible change. Hover, press, focus. */
+    instantTicks: 3,
+    /** ticks — small state changes. Matches `coyoteTime`. */
+    fastTicks: 6,
+    /** ticks — the default for anything that moves more than a few pixels. */
+    baseTicks: 12,
+    /** ticks — the screen wipe. Equals `rollDuration` 0.30s, deliberately. */
+    screenTicks: 18,
+    /** ticks — long reveals. Equals `slideDuration` 0.55s. */
+    slowTicks: 33,
+
+    /** ticks — how far ahead of the colour layer the incoming screen's key-line
+     *  arrives during a wipe. A two-colour screen print is never in perfect
+     *  register; this is that tell, and it is the whole reason the transition
+     *  does not read as a generic slide. */
+    registerLeadTicks: 2,
+    /** px — how far the key-line layer is offset while out of register. */
+    registerOffsetPx: 3,
+
+    // ── HUD ─────────────────────────────────────────────────────────────────
+    /** Hz — rate the frame loop pushes values into the HUD.
+     *
+     *  docs/ARCHITECTURE.md §3.1: the eye cannot read a number changing at 60Hz,
+     *  and writing one 60 times a second is layout work nobody sees. This is a
+     *  ceiling on DOM writes, not on the sim — the sim still runs at 60. */
+    hudPushHz: 15,
+    /** px — the AXIS ring's outer edge on desktop. */
+    ringSizeDesktop: 112,
+    /** px — and on mobile. Above the 56px hit-target floor in GAME_BIBLE §6.2
+     *  because the ring is also the Overdrive button. */
+    ringSizeMobile: 88,
+    /** px — the ring's stroke at rest. Matches the 2-3px key-line in §11.1. */
+    ringStroke: 6,
+    /** px — the ring's stroke once Flow is full. Weight, not glow: §11.3 bans
+     *  emissive anywhere outside Overdrive, so "this is ready" has to be carried
+     *  by ink. */
+    ringStrokeFull: 10,
+    /** x — peak scale of the near-miss kick. Attack is instant, decay eases. */
+    ringKickScale: 1.12,
+    /** ticks — how long the near-miss kick takes to decay. */
+    ringKickTicks: 6,
+    /** x — peak scale of the at-100 idle pulse. Much smaller than the kick, so a
+     *  near-miss still reads as an event while the ring is already breathing. */
+    ringPulseScale: 1.04,
+    /** count — pooled floating "+6" nodes. A 60-near-miss run must allocate
+     *  nothing, so these are recycled rather than created. */
+    flowPopupPool: 8,
+    /** ticks — how long a floating Flow award stays on screen. */
+    flowPopupTicks: 45,
+    /** px — how far it drifts before it is recycled. */
+    flowPopupDriftPx: 56,
+
+    /** ticks — time for one digit to roll one place on the odometer. Digits
+     *  translate; they never fade — GAME_BIBLE §11.2. */
+    odometerRollTicks: 8,
+    /** count — maximum digits any counter renders. Six covers 999,999m, which no
+     *  run reaches, and fixes the width so the layout cannot reflow. */
+    odometerMaxDigits: 7,
+
+    // ── Death screen ────────────────────────────────────────────────────────
+    /** ticks — gap between the five beats of the death sequence. */
+    deathBeatTicks: 12,
+    /** ticks — how long the score counts up. */
+    deathCountTicks: 33,
+
+    // ── Layout ──────────────────────────────────────────────────────────────
+    /** px — minimum interactive target. WCAG 2.2 AA target size is 24; 44 is the
+     *  platform convention and the honest floor for a thumb at speed. */
+    minTargetPx: 44,
+    /** px — the viewport width the mobile layout is designed and tested at. */
+    mobileBreakpointPx: 720,
+    /** count — discrete cells in a settings slider. A continuous track needs a
+     *  gradient or a soft thumb; 20 flat plates reads as printed. */
+    sliderSteps: 20,
+    /** px — halftone dot pitch. Fixed to the viewport so it does not swim when
+     *  the camera moves, per §11.1. */
+    halftonePitchPx: 4,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 17. Enforced budgets — docs/TUNING.md §14
   //
   // These are tests, not aspirations. They fail CI.
   // ───────────────────────────────────────────────────────────────────────────
@@ -1402,6 +1501,16 @@ export const TUNING = {
      *  these frequencies moves far less than this between adjacent samples;
      *  a discontinuity from a hard gain change moves much more. */
     audioClickThreshold: 0.25,
+
+    /** count — React commits permitted in the UI tree during a run, after the
+     *  first paint. Zero, and it is a hard zero rather than a small number:
+     *  one `setState` in the frame path re-renders the HUD subtree 60 times a
+     *  second and there is no such thing as a little bit of that.
+     *  Measured by `<Profiler>` in `tests/e2e/ui.spec.ts`. */
+    uiCommitsDuringRun: 0,
+    /** x — WCAG AA contrast floor for every text role against its real ground.
+     *  Recomputed from the theme hex values in `tests/ui/contrast.test.ts`. */
+    uiContrastMin: 4.5,
   },
 } as const;
 

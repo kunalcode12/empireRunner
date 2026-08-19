@@ -1,55 +1,184 @@
 /**
- * AXIS design tokens.
+ * AXIS design tokens — P14.
  *
  * Screen-printed arcade: thick flat colour fields, heavy black key-lines, visible
  * halftone grain, 4-6 colours per theme, deep shadow, no soft gradients.
- * Full art direction in docs/GAME_BIBLE.md §11.
+ * Full art direction in docs/GAME_BIBLE.md §11. Numbers in docs/TUNING.md §18.
+ *
+ * ## Read this before adding a colour
+ *
+ * There are no colours in this file that are not in a theme's palette. Every
+ * surface, rule, glyph and label resolves to a `--axis-*` role below, and the
+ * roles are written by `src/ui/theme.ts` from `src/game/config/themes.ts` when the
+ * run crosses a theme milestone. A hex value typed into a component is a bug, and
+ * `tests/ui/contrast.test.ts` cannot protect you from one because it only knows
+ * about the registry.
+ *
+ * The Kiln block below is the boot palette, duplicated here so the first paint
+ * has real colour before any JS runs. It is the only duplication, and
+ * `tests/ui/tokens.test.ts` asserts it matches the registry exactly.
  *
  * BANNED, per GAME_BIBLE §11.3 — do not reintroduce, not even as a placeholder:
  *   - backgrounds darker than the active theme's darkest colour
  *   - neon cyan / magenta as a primary or accent
- *   - emissive glow as an ambient material property (Overdrive only)
+ *   - emissive glow as an ambient property (Overdrive only)
  *   - perspective grid floors with glowing lines
- *   - constant chromatic aberration, scanlines outside the Static theme
- *
- * Only the Kiln palette is defined here. Undertow, Bazaar and Static land with the
- * theme registry in P10 (src/game/config/themes.ts).
+ *   - constant chromatic aberration; scanlines outside the Static theme
+ *   - and, added at P14 because they are the same failure in DOM clothing:
+ *     `backdrop-filter: blur()`, blurred `box-shadow`, `opacity` cross-fades,
+ *     `border-radius` on a plate, and any `linear-gradient` without hard stops.
  */
 
 :root {
-  /* ── Kiln palette — 5 colours, and that is the whole list ─────────────── */
-  --axis-keyline: #0b0b0c;
-  --axis-gunmetal: #2b2b2f;
-  --axis-ember: #e4572e;
-  --axis-ash: #8c8c90;
-  --axis-bone: #ede6db;
+  /* ── Colour roles. Written by src/ui/theme.ts; Kiln is the boot value. ──── */
+  --axis-ground: #0b0b0c;
+  --axis-surface: #2b2b2f;
+  --axis-text: #ede6db;
+  --axis-text-dim: #8c8c90;
+  --axis-accent: #e4572e;
+  --axis-structural: #2b2b2f;
 
-  /* ── Semantic roles ───────────────────────────────────────────────────── */
-  --axis-bg: var(--axis-keyline);
-  --axis-fg: var(--axis-bone);
-  --axis-muted: var(--axis-ash);
-  --axis-accent: var(--axis-ember);
-  --axis-surface: var(--axis-gunmetal);
+  /* Ink is always the key-line black. Key-lines, hard shadows, and the fill the
+     HUD swaps to in Overdrive. Never lighter than the ground. */
+  --axis-ink: #0b0b0c;
 
-  /* ── Type ──────────────────────────────────────────────────────────────
-   * Real typefaces are P10/P14 work: a heavy condensed grotesque for display,
-   * a wide mono for every numeral in the game, one clean sans for body.
-   * System stacks stand in until then — deliberately, so the build has no
-   * network dependency and CI cannot fail on a font fetch.
-   */
-  --axis-font-display:
-    "Haettenschweiler", "Arial Narrow", "Oswald", ui-sans-serif, system-ui, sans-serif;
-  --axis-font-mono:
-    ui-monospace, "SFMono-Regular", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
-  --axis-font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Text on an accent plate. The accent colours are all mid-luminance, so the
+     legible partner is the key-line, not the theme's text colour. */
+  --axis-on-accent: #0b0b0c;
 
-  /* ── Key-line weight. 2-3px at 1080p, scaling with distance in 3D. ────── */
-  --axis-keyline-width: 2px;
+  /* The accent, when it is being used as TEXT.
+     On the ground it is always the accent. On a raised surface it is the accent
+     only where the theme says that clears 4.5:1 — Kiln's ember on gunmetal is
+     3.83:1 and Bazaar's ochre on indigo is 4.19:1, so both fall back. The switch
+     is `data-accent-on-surface`, written by theme.ts from the registry. */
+  --axis-accent-text: var(--axis-accent);
 
-  /* ── Spacing scale ────────────────────────────────────────────────────── */
-  --axis-space-1: 0.25rem;
-  --axis-space-2: 0.5rem;
-  --axis-space-3: 1rem;
-  --axis-space-4: 2rem;
-  --axis-space-5: 4rem;
+  /* ── Key-line weight. 2px at 1080p; 3px on display type. ────────────────── */
+  --axis-keyline: 2px;
+  --axis-keyline-heavy: 3px;
+
+  /* Deep shadow — GAME_BIBLE §11.1: "a single flat darker colour from the
+     palette, with a hard edge. Not a blur." Blur radius is 0 and stays 0. */
+  --axis-shadow: 6px 6px 0 0 var(--axis-ink);
+  --axis-shadow-tight: 3px 3px 0 0 var(--axis-ink);
+
+  /* ── Typography. Faces come from src/ui/fonts.ts via next/font/local. ───── */
+  --axis-font-display: var(--font-anton), "Haettenschweiler", "Arial Narrow", sans-serif;
+  --axis-font-mono: var(--font-martian), ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --axis-font-body: var(--font-archivo), ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+
+  --axis-type-display-xxl: 96px;
+  --axis-type-display-xl: 56px;
+  --axis-type-display-l: 32px;
+  --axis-type-display-m: 22px;
+  --axis-type-num-hero: 72px;
+  --axis-type-num-hud: 28px;
+  --axis-type-num-body: 16px;
+  --axis-type-body: 16px;
+  --axis-type-label: 12px;
+
+  --axis-track-display: -0.02em;
+  --axis-track-num: -0.03em;
+  --axis-track-label: 0.12em;
+
+  /* ── Spacing. 8px base with a 4px half-step: the 2px key-line must land on an
+     even grid or it renders at 1.5px and softens, which is the one thing this
+     look does not survive. ────────────────────────────────────────────────── */
+  --axis-space-0: 2px;
+  --axis-space-1: 4px;
+  --axis-space-2: 8px;
+  --axis-space-3: 12px;
+  --axis-space-4: 16px;
+  --axis-space-5: 24px;
+  --axis-space-6: 32px;
+  --axis-space-7: 48px;
+  --axis-space-8: 64px;
+  --axis-space-9: 96px;
+
+  /* ── Motion. Durations are whole sim ticks; see docs/TUNING.md §18 for why.
+     The two long ones are the roll and the slide, not invented values. ────── */
+  --axis-motion-instant: 50ms; /* 3 ticks */
+  --axis-motion-fast: 100ms; /* 6 ticks — coyoteTime */
+  --axis-motion-base: 200ms; /* 12 ticks */
+  --axis-motion-screen: 300ms; /* 18 ticks — rollDuration */
+  --axis-motion-slow: 550ms; /* 33 ticks — slideDuration */
+
+  /* The sim's own easing curves, reused rather than re-chosen. */
+  --axis-ease-out: cubic-bezier(0.215, 0.61, 0.355, 1); /* easeOutCubic */
+  --axis-ease-inout: cubic-bezier(0.645, 0.045, 0.355, 1); /* easeInOutCubic */
+  --axis-ease-step: steps(4, end); /* print register only */
+
+  /* ── Halftone. Hard stops, so it is a dot and not a gradient. ──────────── */
+  --axis-halftone-pitch: 4px;
+  --axis-halftone-opacity: 0.14;
+
+  /* ── Layers. One scale, so nothing guesses. ─────────────────────────────── */
+  --axis-z-canvas: 0;
+  --axis-z-hud: 10;
+  --axis-z-halftone: 20;
+  --axis-z-screen: 30;
+  --axis-z-shutter: 40;
+
+  /* ── Safe areas, with a floor so desktop still has margin. ─────────────── */
+  --axis-safe-top: max(var(--axis-space-4), env(safe-area-inset-top));
+  --axis-safe-right: max(var(--axis-space-4), env(safe-area-inset-right));
+  --axis-safe-bottom: max(var(--axis-space-4), env(safe-area-inset-bottom));
+  --axis-safe-left: max(var(--axis-space-4), env(safe-area-inset-left));
+}
+
+/*
+ * Overdrive — the HUD inverts.
+ *
+ * GAME_BIBLE §4.3: "the theme's key-line black becomes the fill, the fill becomes
+ * the line." Applied as a data attribute on the root so every token flips at once
+ * and no component has to know Overdrive exists. This is also the only place in
+ * the DOM where §11.3 permits emission, and it still does not use any: the
+ * inversion alone is the effect.
+ */
+:root[data-overdrive="1"] {
+  --axis-ground: #ede6db;
+  --axis-surface: #0b0b0c;
+  --axis-text: #0b0b0c;
+  --axis-text-dim: #0b0b0c;
+  --axis-ink: #ede6db;
+  --axis-on-accent: #ede6db;
+}
+
+/*
+ * Colourblind-safe mode.
+ *
+ * Hazard identification must never depend on hue alone. In the DOM that means
+ * every colour-coded state also carries halftone density, height, a corner notch,
+ * or key-line weight — those are unconditional in the components. What this
+ * attribute adds is the *pattern* channel on meters and pips, which is off by
+ * default only because it costs a little legibility when it is not needed.
+ *
+ * It suits a print aesthetic exactly: dot density IS the second channel in
+ * one-colour screen printing, so this is not a bolt-on.
+ */
+:root[data-colorblind="1"] {
+  --axis-pattern-opacity: 1;
+}
+:root {
+  --axis-pattern-opacity: 0;
+}
+
+/*
+ * Reduced motion.
+ *
+ * Not a blanket kill. `feel/reducedMotion.ts` explains the principle for the 3D
+ * layer and the same one applies here: remove motion that carries no information,
+ * keep every cue the player needs. So the shutter still moves — a screen changing
+ * with no transition is a state change the player can miss entirely — but it goes
+ * to `--axis-motion-fast`, the ring stops idling, and nothing loops.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) {
+    --axis-motion-screen: var(--axis-motion-fast);
+    --axis-motion-slow: var(--axis-motion-base);
+  }
+}
+:root[data-motion="reduced"] {
+  --axis-motion-screen: var(--axis-motion-fast);
+  --axis-motion-slow: var(--axis-motion-base);
 }

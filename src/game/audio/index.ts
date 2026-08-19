@@ -6,13 +6,19 @@
  * re-exported: they are implementation, and a caller reaching for a voice
  * directly has bypassed the ducking and the latency offset.
  *
- * The render layer needs exactly `createAudioDirector` and the three methods on
+ * The render layer needs exactly `acquireAudioDirector` and the three methods on
  * what it returns. Settings and latency are exported for the P14 settings
  * screen, which needs to read and write them without knowing how the graph is
  * wired.
  */
 
-export { createAudioDirector, type AudioDirector, type AudioEvent } from "./director";
+export {
+  acquireAudioDirector,
+  createAudioDirector,
+  resetAudioSession,
+  type AudioDirector,
+  type AudioEvent,
+} from "./director";
 export { createAudioEngine, type AudioEngine, type AudioBuses } from "./engine";
 export {
   Bus,

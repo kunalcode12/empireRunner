@@ -375,3 +375,133 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
     },
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The session director
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One `AudioContext` for the whole session, reference-counted.
+ *
+ * ## Why this exists — a bug P14 walked straight into
+ *
+ * Until P14 the director was created in exactly one place, by the game loop, and
+ * a per-mount instance was harmless. Then the title screen got a diorama with its
+ * own audio, and pressing RUN unmounted one director and mounted another. Three
+ * things broke at once:
+ *
+ *   1. **Audio stopped on every run start.** The new context is created locked,
+ *      and its gesture listeners are armed *after* the click that started the
+ *      run — so the click that should have unlocked it was already spent. Music
+ *      played on the menu and died the moment you pressed RUN.
+ *   2. **Contexts leak.** Chrome allows roughly six `AudioContext`s per page.
+ *      Six runs and the seventh is silent for good.
+ *   3. **Warm-up repeats.** Every run re-rendered twenty-six one-shots and four
+ *      stems — hundreds of milliseconds of main-thread work at precisely the
+ *      moment the player expects the game to start.
+ *
+ * An `AudioContext` is a **session** resource, like a WebGL context. It belongs
+ * to the page, not to whichever component happens to be mounted.
+ *
+ * ## Reference counting, not a bare singleton
+ *
+ * Callers still pair `acquire`/`dispose` exactly as before, so nothing at the
+ * call site changes and the last release still tears the graph down — which
+ * matters for tests and for a route change away from the game. What changes is
+ * that a mid-session handover, where one consumer mounts before the other
+ * unmounts, keeps the same context alive.
+ */
+let sessionDirector: AudioDirector | null = null;
+let sessionRefs = 0;
+let teardownTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * A handle on the shared director.
+ *
+ * The returned object is a thin wrapper whose `dispose` releases one reference
+ * rather than destroying the graph. Calling it twice is safe and counts once.
+ */
+export function acquireAudioDirector(options: AudioDirectorOptions = {}): AudioDirector {
+  // A pending teardown means the last release was part of a handover, not a
+  // shutdown. Cancelling it here is what keeps the context alive across it.
+  if (teardownTimer !== null) {
+    clearTimeout(teardownTimer);
+    teardownTimer = null;
+  }
+  if (sessionDirector === null) {
+    sessionDirector = createAudioDirector(options);
+  }
+  sessionRefs += 1;
+  const shared = sessionDirector;
+  let released = false;
+
+  return {
+    get engine() {
+      return shared.engine;
+    },
+    get ready() {
+      return shared.ready;
+    },
+    get music() {
+      return shared.music;
+    },
+    get voicePeak() {
+      return shared.voicePeak;
+    },
+    handleEvent(event: AudioEvent): void {
+      shared.handleEvent(event);
+    },
+    setTelemetry(worldSpeed: number, flow: number): void {
+      shared.setTelemetry(worldSpeed, flow);
+    },
+    dispose(): void {
+      if (released) {
+        return;
+      }
+      released = true;
+      sessionRefs -= 1;
+      if (sessionRefs > 0) {
+        return;
+      }
+      sessionRefs = 0;
+
+      /**
+       * Teardown is deferred by one turn of the event loop, and that is the
+       * whole point.
+       *
+       * React unmounts the outgoing tree **before** it mounts the incoming one,
+       * so during a title -> run handover the reference count passes through
+       * zero even though audio is wanted continuously. Tearing down there threw
+       * the context away and built a fresh, locked one whose gesture listeners
+       * were armed after the click that started the run — so the music died on
+       * every single RUN press and never recovered.
+       *
+       * A zero-delay timer outlives that gap, because React commits the unmount
+       * and the mount in one synchronous pass. If nothing re-acquires, the
+       * teardown lands on the next tick exactly as it would have.
+       */
+      if (teardownTimer !== null) {
+        clearTimeout(teardownTimer);
+      }
+      teardownTimer = setTimeout(() => {
+        teardownTimer = null;
+        if (sessionRefs > 0) {
+          return;
+        }
+        sessionDirector?.dispose();
+        sessionDirector = null;
+      }, 0);
+    },
+  };
+}
+
+/** Tests only: drops the session director immediately, refs or not. */
+export function resetAudioSession(): void {
+  if (teardownTimer !== null) {
+    clearTimeout(teardownTimer);
+    teardownTimer = null;
+  }
+  sessionDirector?.dispose();
+  sessionDirector = null;
+  sessionRefs = 0;
+}

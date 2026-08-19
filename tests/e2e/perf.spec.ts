@@ -85,6 +85,20 @@ test.describe("render perf", () => {
     // its stats rather than for an arbitrary timeout.
     await page.waitForFunction(() => window.__axisPerf !== undefined, null, { timeout: 60_000 });
 
+    /**
+     * Start a run. **This is not optional.**
+     *
+     * P14 made `/play` open on a title screen whose diorama is three meshes. The
+     * budget here is for a run at band-5 density — obstacles, pickups, particles,
+     * shadows — and measuring the menu instead reported a peak of 5 draw calls
+     * and 0 particles against a budget of 50. It passed, and it proved nothing.
+     *
+     * A test that cannot fail is worse than no test.
+     */
+    await page.getByRole("button", { name: "RUN", exact: true }).click({ timeout: 60_000 });
+    // Past the shutter and into a live run before the sampling starts.
+    await page.waitForTimeout(2_000);
+
     const readHeap = async (): Promise<HeapSample> =>
       page.evaluate(() => {
         const perf = performance as Performance & { memory?: { usedJSHeapSize: number } };
@@ -152,7 +166,15 @@ test.describe("render perf", () => {
 
     // ── Gates ───────────────────────────────────────────────────────────────
     // Exact counts only. FPS is reported, never asserted, in this environment.
-    expect(peakDrawCalls).toBeGreaterThan(0);
+    // A floor as well as a ceiling. The title diorama draws 5; a real run draws
+    // the tunnel faces, four obstacle buckets, the pickups and the runner, plus
+    // a shadow pass on the tiers that have one. Anything at or under the menu's
+    // count means this measured the wrong screen — which it silently did once.
+    const RUN_DRAW_CALL_FLOOR = 8;
+    expect(
+      peakDrawCalls,
+      `only ${peakDrawCalls} draw calls — this looks like the menu, not a run`,
+    ).toBeGreaterThan(RUN_DRAW_CALL_FLOOR);
     expect(peakDrawCalls, `draw calls ${peakDrawCalls} >= budget ${budget}`).toBeLessThan(budget);
     expect(final.frames).toBeGreaterThan(0);
     expect(consoleErrors).toEqual([]);

@@ -1,0 +1,1776 @@
+/**
+ * AXIS component styles.
+ *
+ * Tokens live in `tokens.css`; this is what they build. Read that file's header
+ * first — in particular the list of DOM idioms that are banned here because they
+ * are soft gradients wearing a different name.
+ *
+ * Rules that hold everywhere in this file:
+ *   - `border-radius` is 0. The Bit glyph is a drawn octagon, not a rounded box.
+ *   - Every `box-shadow` has a blur radius of 0.
+ *   - No `opacity` transition on anything carrying a number.
+ *   - No `filter`, no `backdrop-filter`.
+ *   - Every colour is a `--axis-*` role. There are no hex values below.
+ */
+
+/* ─── Primitives ────────────────────────────────────────────────────────── */
+
+.axis-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.axis-num {
+  font-family: var(--axis-font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-stretch: 112.5%;
+  letter-spacing: var(--axis-track-num);
+}
+
+.axis-label {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-label);
+  font-weight: 700;
+  letter-spacing: var(--axis-track-label);
+  text-transform: uppercase;
+  color: var(--axis-text-dim);
+}
+
+.axis-body {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-body);
+  line-height: 1.45;
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-glyph {
+  display: inline-block;
+  vertical-align: -0.14em;
+  flex: none;
+}
+
+.axis-glyph-back {
+  transform: rotate(180deg);
+}
+
+/* ─── Halftone ──────────────────────────────────────────────────────────── */
+
+/*
+ * Anchored to the viewport, not to a panel — §11.1 requires the grain not to
+ * swim. A screen sliding in during a transition therefore slides UNDER a
+ * stationary dot field, which is the difference between ink on paper and a
+ * texture on a moving object.
+ *
+ * Hard stops (45% -> 46%) make this an aliased circle, not a ramp.
+ */
+.axis-halftone {
+  position: fixed;
+  inset: 0;
+  z-index: var(--axis-z-halftone);
+  pointer-events: none;
+  opacity: var(--axis-halftone-opacity);
+  background-image: radial-gradient(circle at center, var(--axis-ink) 0 45%, transparent 46% 100%);
+  background-size: var(--axis-halftone-pitch) var(--axis-halftone-pitch);
+}
+
+/* ─── Plate ─────────────────────────────────────────────────────────────── */
+
+/*
+ * A raised plate carries TWO inks, not three.
+ *
+ * `--axis-text-dim` is only ever guaranteed legible against the **ground** —
+ * `config/themes.ts` says so, and the audit found the consequence in production:
+ * Kiln's ash `#8C8C90` on gunmetal `#2B2B2F` is 4.21:1, which fails AA by a
+ * margin nobody spots by eye. It appeared on 75 elements across four screens.
+ *
+ * So inside a plate the dim role resolves to the primary text colour, and
+ * hierarchy is carried by size, weight and tracking instead — which is how it
+ * works in print anyway. You do not get a third ink on a panel.
+ */
+/*
+ * `:not([... = "1"])`, not `[... = "0"]`.
+ *
+ * The attribute is written by `theme.ts`, which does not run until a theme is
+ * applied — so before the first run it is absent, and a `="0"` selector matched
+ * nothing. The mobile loadout kept rendering ember on gunmetal at 3.83:1.
+ *
+ * Inverting it makes the SAFE value the default: accent-as-text on a surface has
+ * to be opted into by a theme that has proven it clears 4.5:1, rather than
+ * opted out of by one that has not.
+ */
+:root:not([data-accent-on-surface="1"]) .axis-plate,
+:root:not([data-accent-on-surface="1"]) .axis-avatar-tile {
+  --axis-accent-text: var(--axis-text);
+}
+
+/* The avatar tile is a raised surface too — it is just a button rather than a
+   Plate, so it needs the same two-ink rule. It read 4.21:1 on eight labels until
+   the audit found it. */
+.axis-avatar-tile {
+  --axis-text-dim: var(--axis-text);
+}
+
+.axis-plate {
+  --axis-text-dim: var(--axis-text);
+  background: var(--axis-surface);
+  border: var(--axis-keyline) solid var(--axis-ink);
+  box-shadow: var(--axis-shadow);
+  padding: var(--axis-space-5);
+  margin: 0;
+  list-style: none;
+}
+
+.axis-plate[data-tone="accent"] {
+  background: var(--axis-accent);
+  color: var(--axis-on-accent);
+}
+
+.axis-plate[data-tone="ground"] {
+  background: var(--axis-ground);
+}
+
+/* A plate inside a plate keeps the key-line and loses the shadow — stacked
+   offsets read as mud rather than as depth. */
+.axis-plate[data-flat="1"] {
+  box-shadow: none;
+}
+
+/* ─── Button ────────────────────────────────────────────────────────────── */
+
+.axis-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--axis-space-2);
+  padding: var(--axis-space-3) var(--axis-space-5);
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-body);
+  font-weight: 700;
+  letter-spacing: var(--axis-track-label);
+  text-transform: uppercase;
+  color: var(--axis-text);
+  background: var(--axis-surface);
+  border: var(--axis-keyline) solid var(--axis-ink);
+  box-shadow: var(--axis-shadow-tight);
+  cursor: pointer;
+  /* Removes the 300ms tap delay without a meta-viewport hack, and stops a
+     double-tap from zooming even where `user-scalable=no` is ignored. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--axis-motion-instant) var(--axis-ease-out),
+    box-shadow var(--axis-motion-instant) var(--axis-ease-out);
+}
+
+.axis-button[data-variant="primary"] {
+  background: var(--axis-accent);
+  color: var(--axis-on-accent);
+  border-width: var(--axis-keyline-heavy);
+  box-shadow: var(--axis-shadow);
+}
+
+.axis-button[data-variant="ghost"] {
+  background: transparent;
+  box-shadow: none;
+  border-color: transparent;
+  color: var(--axis-text-dim);
+}
+
+.axis-button[data-variant="chip"] {
+  padding: var(--axis-space-2) var(--axis-space-3);
+}
+
+.axis-button[data-block="1"] {
+  display: flex;
+  width: 100%;
+}
+
+.axis-button[data-selected="1"] {
+  background: var(--axis-accent);
+  color: var(--axis-on-accent);
+  /* The second channel: a selected control is also taller. Colour alone would
+     be invisible to a player who cannot separate accent from surface. */
+  padding-block: calc(var(--axis-space-3) + var(--axis-space-1));
+}
+
+/* Press moves the plate along its own shadow's diagonal — the print-block
+   idiom. There is no blur radius here to animate instead. */
+.axis-button:active:not(:disabled) {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 0 var(--axis-ink);
+}
+
+.axis-button:disabled {
+  cursor: not-allowed;
+  color: var(--axis-text-dim);
+  background: var(--axis-structural);
+  box-shadow: none;
+}
+
+/*
+ * Focus. Two channels — a heavy accent ring AND an inset key-line — because a
+ * single coloured outline can vanish against the plate under it.
+ * The default outline is replaced, never merely removed.
+ */
+.axis-button:focus-visible,
+.axis-avatar-tile:focus-visible,
+.axis-ring-button:focus-visible,
+.axis-slider-input:focus-visible {
+  outline: var(--axis-keyline-heavy) solid var(--axis-accent);
+  outline-offset: 3px;
+  box-shadow: inset 0 0 0 var(--axis-keyline) var(--axis-text);
+}
+
+/* ─── Meter ─────────────────────────────────────────────────────────────── */
+
+/*
+ * `width: 100%` and `align-self: stretch` are both required.
+ *
+ * The cells are `flex: 1` of the meter's width, so a meter with no width has no
+ * cells. Inside a column with `align-items: flex-start` — the avatar screen's
+ * lifetime plate — it collapsed to a 4px square and the whole readout vanished.
+ * Found by looking at a screenshot; nothing about the markup looked wrong.
+ */
+.axis-meter {
+  display: flex;
+  width: 100%;
+  align-self: stretch;
+  gap: 2px;
+  height: 14px;
+  border: var(--axis-keyline) solid var(--axis-ink);
+  background: var(--axis-ground);
+  padding: 2px;
+}
+
+.axis-meter-cell {
+  flex: 1;
+  background: var(--axis-structural);
+}
+
+.axis-meter-cell[data-filled="1"] {
+  background: var(--axis-accent);
+  /* The colourblind channel: dot density over the fill, off at 0 opacity by
+     default and turned on by the setting. */
+  background-image: radial-gradient(circle at center, var(--axis-ink) 0 40%, transparent 41%);
+  background-size: 3px 3px;
+  /* `opacity` on a background-image is not a thing, so the pattern is toggled by
+     compositing it away — a colour-mix at 0 leaves the flat fill untouched. */
+  background-blend-mode: normal;
+}
+
+:root:not([data-colorblind="1"]) .axis-meter-cell[data-filled="1"] {
+  background-image: none;
+}
+
+/* ─── Tier pips ─────────────────────────────────────────────────────────── */
+
+.axis-pips {
+  display: inline-flex;
+  gap: var(--axis-space-1);
+}
+
+.axis-pip {
+  width: 16px;
+  height: 16px;
+  border: var(--axis-keyline) solid var(--axis-ink);
+  background: var(--axis-structural);
+}
+
+.axis-pip[data-state="owned"] {
+  background: var(--axis-accent);
+}
+
+/* "Next" gets the key-line, a lighter fill, AND a corner notch — three signals,
+   so the tier a player is about to buy is never colour alone. */
+.axis-pip[data-state="next"] {
+  background: var(--axis-ground);
+  border-color: var(--axis-accent);
+  clip-path: polygon(0 0, 100% 0, 100% 65%, 65% 100%, 0 100%);
+}
+
+/*
+ * A locked pip sinks INTO the plate rather than sitting on it.
+ *
+ * The first version filled it with `--axis-structural` and dropped the
+ * key-line — but `structural` and `surface` are the same colour in Kiln, so a
+ * locked pip was invisible on a plate and the row read as "no tiers left". The
+ * ground colour is always at least one palette step from the surface, so an
+ * inset reads at every theme.
+ */
+.axis-pip[data-state="locked"] {
+  background: var(--axis-ground);
+  border-color: var(--axis-ground);
+}
+
+/* ─── Slider ────────────────────────────────────────────────────────────── */
+
+.axis-slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--axis-space-2) var(--axis-space-4);
+  align-items: center;
+  margin-bottom: var(--axis-space-4);
+}
+
+.axis-slider-label {
+  grid-column: 1 / -1;
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-label);
+  font-weight: 700;
+  letter-spacing: var(--axis-track-label);
+  text-transform: uppercase;
+  color: var(--axis-text-dim);
+}
+
+.axis-slider-body {
+  position: relative;
+  height: var(--axis-space-6);
+}
+
+.axis-slider-cells {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 2px;
+  border: var(--axis-keyline) solid var(--axis-ink);
+  background: var(--axis-ground);
+  padding: 3px;
+  pointer-events: none;
+}
+
+.axis-slider-cell {
+  flex: 1;
+  background: var(--axis-structural);
+}
+
+.axis-slider-cell[data-filled="1"] {
+  background: var(--axis-accent);
+}
+
+/* The zero mark on a bipolar slider. A registration tick, not a fill — it has to
+   be visible whether the value sits left or right of it. */
+.axis-slider-cell[data-origin="1"] {
+  background: var(--axis-text-dim);
+}
+
+/*
+ * The real input, invisible but fully operable. Arrow keys, Home/End, page
+ * up/down, screen readers, switch access and voice control all work because this
+ * is a native range and not a div with a keydown handler.
+ */
+.axis-slider-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.axis-slider-value {
+  font-family: var(--axis-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--axis-type-num-body);
+  color: var(--axis-text);
+  min-width: 5ch;
+  text-align: right;
+}
+
+.axis-slider-hint {
+  grid-column: 1 / -1;
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-label);
+  line-height: 1.4;
+  color: var(--axis-text-dim);
+  margin: 0;
+}
+
+/* ─── Odometer ──────────────────────────────────────────────────────────── */
+
+.axis-odo {
+  display: inline-flex;
+  align-items: flex-start;
+  font-family: var(--axis-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-stretch: 112.5%;
+  letter-spacing: var(--axis-track-num);
+  line-height: var(--axis-odo-line);
+  color: var(--axis-text);
+}
+
+/* The clipping window: exactly one digit tall. */
+.axis-odo-col {
+  display: inline-block;
+  height: calc(1em * var(--axis-odo-line));
+  overflow: hidden;
+}
+
+/* The strip of 0-9. Only `transform` animates — never opacity. */
+.axis-odo-strip {
+  display: block;
+  will-change: transform;
+}
+
+/*
+ * `line-height` MUST equal the cell height.
+ *
+ * The strip is translated by whole multiples of the cell height, so if the text
+ * sits anywhere other than centred in its own cell, every digit is offset by the
+ * same amount and the whole counter looks mis-set. Leaving the inherited
+ * line-height is what clipped the tops of the digits in the first pass.
+ */
+.axis-odo-cell {
+  display: block;
+  height: calc(1em * var(--axis-odo-line));
+  line-height: calc(1em * var(--axis-odo-line));
+  text-align: center;
+}
+
+.axis-odo-sep,
+.axis-odo-suffix {
+  display: inline-block;
+}
+
+.axis-odo-hero {
+  font-size: var(--axis-type-num-hero);
+  font-weight: 700;
+}
+
+.axis-odo-sub {
+  font-size: var(--axis-type-num-hud);
+  font-weight: 600;
+}
+
+/* ─── HUD ───────────────────────────────────────────────────────────────── */
+
+.axis-hud {
+  position: fixed;
+  inset: 0;
+  z-index: var(--axis-z-hud);
+  /* The HUD is a readout, not a surface. Only its own controls take input. */
+  pointer-events: none;
+  padding: var(--axis-safe-top) var(--axis-safe-right) var(--axis-safe-bottom) var(--axis-safe-left);
+}
+
+/*
+ * `display: none`, NOT `visibility: hidden`.
+ *
+ * `visibility` inherits, and a child can override it back to `visible` — which
+ * the odometer columns do, deliberately, to hide leading zeros. So a hidden HUD
+ * still painted three zeroed counters over the title screen. Caught in the first
+ * screenshot pass; it is exactly the kind of bug that survives code review.
+ */
+.axis-hud[data-hidden="1"] {
+  display: none;
+}
+
+.axis-hud[data-paused="1"] .axis-hud-top,
+.axis-hud[data-paused="1"] .axis-hud-bits {
+  /* A held run's numbers stop being live information. Dimmed by swapping the
+     colour role, not by an opacity fade. */
+  color: var(--axis-text-dim);
+}
+
+.axis-hud-pause,
+.axis-ring-button {
+  pointer-events: auto;
+}
+
+.axis-hud-pause {
+  position: absolute;
+  top: var(--axis-safe-top);
+  left: var(--axis-safe-left);
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  background: var(--axis-surface);
+  border: var(--axis-keyline) solid var(--axis-ink);
+  box-shadow: var(--axis-shadow-tight);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.axis-hud-pause-glyph {
+  width: 18px;
+  height: 20px;
+  background: var(--axis-text);
+  clip-path: polygon(0 0, 35% 0, 35% 100%, 0 100%, 0 0, 65% 0, 100% 0, 100% 100%, 65% 100%, 65% 0);
+}
+
+.axis-hud-top {
+  position: absolute;
+  top: var(--axis-safe-top);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.axis-hud-label {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-label);
+  font-weight: 700;
+  letter-spacing: var(--axis-track-label);
+  color: var(--axis-text-dim);
+}
+
+.axis-hud-bits {
+  position: absolute;
+  top: var(--axis-safe-top);
+  right: var(--axis-safe-right);
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--axis-space-2);
+  color: var(--axis-text);
+  font-size: var(--axis-type-num-hud);
+}
+
+.axis-hud-bitglyph {
+  display: inline-flex;
+  width: 1em;
+  color: var(--axis-accent);
+}
+
+.axis-hud-centre {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.axis-hud-corner {
+  position: absolute;
+  right: var(--axis-safe-right);
+  bottom: var(--axis-safe-bottom);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ─── THE AXIS RING ─────────────────────────────────────────────────────── */
+
+.axis-ring {
+  position: relative;
+  width: var(--axis-ring-size, 112px);
+  height: var(--axis-ring-size, 112px);
+  transform-origin: center;
+}
+
+.axis-ring-button {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.axis-ring-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/*
+ * The empty track is `text-dim`, not `structural`.
+ *
+ * Structural is the surface colour, and the ring sits directly on the tunnel
+ * rather than on a plate — so at Flow 0 the whole meter vanished into the wall
+ * and the player had no idea where it was. Caught in the first screenshot pass.
+ * An empty meter still has to be findable, or the full one is a surprise.
+ */
+.axis-ring-track {
+  fill: none;
+  stroke: var(--axis-text-dim);
+  stroke-width: 6;
+}
+
+.axis-ring-fill {
+  fill: none;
+  stroke: var(--axis-accent);
+  stroke-width: 6;
+  stroke-linecap: butt;
+  /* Mitred, not rounded: the corners are the readable landmarks and rounding
+     them destroys the quarter marks the shape exists for. */
+  stroke-linejoin: miter;
+  transition: stroke-dashoffset var(--axis-motion-fast) linear;
+}
+
+.axis-ring-ticks line {
+  stroke: var(--axis-text-dim);
+  stroke-width: 3;
+}
+
+.axis-ring-face {
+  fill: none;
+  stroke: var(--axis-text);
+  stroke-width: 3;
+  transition: none;
+}
+
+/* Full: the ring closes, floods, and thickens. Weight, never glow — §11.3
+   permits emission only inside Overdrive. */
+.axis-ring[data-full="1"] .axis-ring-fill {
+  stroke-width: 10;
+}
+
+.axis-ring[data-full="1"] .axis-ring-track {
+  stroke: var(--axis-accent);
+}
+
+/* The at-100 pulse, on the musical bar. The period is written from
+   `TUNING.audio` by AxisRing.ts, so the meter breathes in time with the track
+   already playing. */
+@keyframes axis-ring-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  18% {
+    transform: scale(1.04);
+  }
+}
+
+.axis-ring[data-pulse="1"] {
+  animation: axis-ring-pulse var(--axis-ring-pulse-ms, 1905ms) var(--axis-ease-out) infinite;
+}
+
+.axis-ring-centre {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--axis-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--axis-type-num-body);
+  font-weight: 700;
+  color: var(--axis-text);
+  pointer-events: none;
+}
+
+.axis-ring-shields {
+  display: flex;
+  gap: var(--axis-space-1);
+  margin-top: var(--axis-space-2);
+}
+
+.axis-ring-shield {
+  width: 10px;
+  height: 10px;
+  background: var(--axis-text);
+  border: 2px solid var(--axis-ink);
+}
+
+.axis-flow-popups {
+  position: absolute;
+  bottom: calc(var(--axis-ring-size, 112px) + var(--axis-space-3));
+  right: 0;
+  height: 0;
+}
+
+.axis-flow-popup {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-family: var(--axis-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--axis-type-num-hud);
+  font-weight: 700;
+  color: var(--axis-accent);
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* ─── Fracture ──────────────────────────────────────────────────────────── */
+
+.axis-fracture {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  display: grid;
+  place-items: center;
+}
+
+.axis-fracture[data-open="0"] {
+  visibility: hidden;
+}
+
+.axis-fracture-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.axis-fracture-track {
+  fill: none;
+  stroke: var(--axis-structural);
+  stroke-width: 8;
+}
+
+.axis-fracture-drain {
+  fill: none;
+  stroke: var(--axis-accent);
+  stroke-width: 8;
+  stroke-linejoin: miter;
+  transition: stroke-dashoffset var(--axis-motion-instant) linear;
+}
+
+.axis-fracture-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--axis-space-1);
+  text-align: center;
+}
+
+.axis-fracture-arrow {
+  font-size: 44px;
+  line-height: 1;
+  color: var(--axis-text);
+}
+
+.axis-fracture-verb {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  letter-spacing: var(--axis-track-display);
+  color: var(--axis-text);
+}
+
+.axis-fracture-cost {
+  font-family: var(--axis-font-mono);
+  font-size: var(--axis-type-num-body);
+  color: var(--axis-accent-text);
+}
+
+/* ─── Screens ───────────────────────────────────────────────────────────── */
+
+.axis-router {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.axis-screen {
+  position: fixed;
+  inset: 0;
+  z-index: var(--axis-z-screen);
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-5);
+  padding: var(--axis-safe-top) var(--axis-safe-right) var(--axis-safe-bottom) var(--axis-safe-left);
+  background: var(--axis-ground);
+  overflow-y: auto;
+  /* No rubber-banding past the ends of a menu. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Overlays let the world through. There is no scrim and no blur — the tunnel is
+   simply visible past the plates. */
+.axis-screen[data-overlay="1"] {
+  background: transparent;
+  place-content: center;
+  align-items: center;
+}
+
+.axis-screen-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--axis-space-4);
+  flex: none;
+}
+
+.axis-screen-spacer {
+  width: var(--axis-space-8);
+}
+
+.axis-screen-title {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-l);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--axis-text);
+  margin: 0;
+  text-align: center;
+}
+
+.axis-screen-aside {
+  min-width: var(--axis-space-8);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.axis-screen-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-5);
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding-bottom: var(--axis-space-8);
+}
+
+.axis-currency {
+  display: flex;
+  gap: var(--axis-space-4);
+  margin: 0;
+  font-size: var(--axis-type-num-body);
+  color: var(--axis-text);
+}
+
+.axis-currency-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--axis-space-2);
+}
+
+.axis-currency-item .axis-glyph {
+  color: var(--axis-accent);
+}
+
+/* ─── Title ─────────────────────────────────────────────────────────────── */
+
+.axis-title {
+  /* Deliberately transparent: the diorama behind it IS the background. */
+  background: transparent;
+  justify-content: space-between;
+}
+
+.axis-title .axis-screen-body {
+  width: 100%;
+  margin: 0;
+  flex: 1;
+  justify-content: center;
+}
+
+.axis-title-column {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-4);
+}
+
+.axis-wordmark {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-xxl);
+  line-height: 0.86;
+  letter-spacing: var(--axis-track-display);
+  color: var(--axis-text);
+  margin: 0;
+  /* The hard offset is the print register — the wordmark pulled twice, once in
+     ink and once in the key-line. */
+  text-shadow: 6px 6px 0 var(--axis-accent);
+}
+
+.axis-tagline {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-body);
+  color: var(--axis-text-dim);
+  margin: 0 0 var(--axis-space-4);
+  max-width: 34ch;
+}
+
+.axis-title-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-2);
+}
+
+.axis-title-run {
+  font-size: var(--axis-type-display-m);
+  padding-block: var(--axis-space-4);
+}
+
+.axis-title-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--axis-space-2);
+  margin-left: auto;
+}
+
+.axis-title-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--axis-space-5);
+  flex: none;
+}
+
+.axis-title-level {
+  width: min(260px, 45%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-2);
+}
+
+/* ─── Death ─────────────────────────────────────────────────────────────── */
+
+.axis-death {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: transparent;
+}
+
+.axis-death .axis-screen-body {
+  align-items: center;
+  gap: var(--axis-space-4);
+  width: min(640px, 100%);
+}
+
+/*
+ * Beats reveal with `visibility` plus a small translate. Not opacity — the
+ * score is a numeral, §11.2 forbids fading numerals, and applying one rule to
+ * four beats and a different one to the fifth is how a sequence loses its
+ * rhythm.
+ */
+.axis-death > div,
+.axis-death-score,
+.axis-death-best,
+.axis-death-mission,
+.axis-death-bits,
+.axis-death-actions {
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: transform var(--axis-motion-base) var(--axis-ease-out);
+}
+
+[data-shown="1"] {
+  visibility: visible;
+  transform: translateY(0);
+}
+
+/*
+ * The death screen floats text over live 3D, so it cannot rely on a known
+ * background.
+ *
+ * There is deliberately no scrim — the frozen wreckage is the drama. But the
+ * screenshot at 375px landed the ember score directly on the shattered ember
+ * obstacle that had just killed the player, ember on ember. A hard key-line
+ * offset separates the type from whatever is behind it at any colour, and it is
+ * the same print-register device the wordmark already uses, so it costs nothing
+ * stylistically and adds no soft edge.
+ *
+ * The accessibility audit cannot help here: it resolves a background by walking
+ * up the DOM, and above a canvas there is nothing to find.
+ */
+.axis-death-kicker,
+.axis-num-hero,
+.axis-death-bestline {
+  text-shadow:
+    3px 3px 0 var(--axis-ink),
+    -1px -1px 0 var(--axis-ink),
+    1px -1px 0 var(--axis-ink),
+    -1px 1px 0 var(--axis-ink);
+}
+
+.axis-death-kicker {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  letter-spacing: 0.3em;
+  color: var(--axis-text-dim);
+  margin: 0;
+  visibility: visible;
+}
+
+.axis-num-hero {
+  font-family: var(--axis-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--axis-type-num-hero);
+  font-weight: 700;
+  letter-spacing: var(--axis-track-num);
+  color: var(--axis-accent);
+  margin: 0;
+}
+
+.axis-death-bestline {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-body);
+  font-weight: 700;
+  letter-spacing: var(--axis-track-label);
+  text-transform: uppercase;
+  color: var(--axis-text-dim);
+  margin: 0 0 var(--axis-space-3);
+}
+
+.axis-death-bestline[data-beat="1"] {
+  color: var(--axis-accent-text);
+}
+
+.axis-death-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--axis-space-5);
+}
+
+.axis-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-1);
+}
+
+.axis-death-missionplate {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-3);
+  text-align: left;
+}
+
+.axis-death-missionlabel {
+  font-weight: 600;
+}
+
+.axis-death-short {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-l);
+  letter-spacing: 0.1em;
+  color: var(--axis-accent-text);
+  text-align: center;
+  margin: 0;
+}
+
+.axis-death-bitline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--axis-space-2);
+  font-size: var(--axis-type-display-m);
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-death-bitline .axis-glyph {
+  color: var(--axis-accent);
+}
+
+.axis-death-shortfall {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-label);
+  color: var(--axis-text-dim);
+  margin: var(--axis-space-2) 0 0;
+}
+
+.axis-death-actions {
+  display: flex;
+  gap: var(--axis-space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ─── Shop / lists ──────────────────────────────────────────────────────── */
+
+.axis-tabs {
+  display: flex;
+  gap: var(--axis-space-2);
+  align-items: flex-end;
+}
+
+.axis-shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-3);
+}
+
+.axis-shop-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--axis-space-2) var(--axis-space-5);
+  align-items: center;
+}
+
+.axis-shop-rowhead {
+  display: flex;
+  align-items: center;
+  gap: var(--axis-space-4);
+  grid-column: 1;
+}
+
+.axis-shop-name {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  letter-spacing: 0.06em;
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-shop-effect {
+  grid-column: 1;
+  color: var(--axis-text-dim);
+}
+
+.axis-shop-next {
+  color: var(--axis-text);
+}
+
+.axis-shop-row .axis-button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.axis-shop-owned,
+.axis-shop-total {
+  grid-column: 2;
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-label);
+  letter-spacing: var(--axis-track-label);
+  color: var(--axis-text-dim);
+  margin: 0;
+}
+
+.axis-shop-total {
+  text-align: right;
+}
+
+.axis-shop-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-3);
+}
+
+/* ─── Loadout ───────────────────────────────────────────────────────────── */
+
+.axis-loadout {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 2fr;
+  gap: var(--axis-space-5);
+}
+
+.axis-loadout-slots,
+.axis-loadout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--axis-space-3);
+  margin-top: var(--axis-space-2);
+}
+
+.axis-loadout-avatarplate,
+.axis-loadout-slot,
+.axis-loadout-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-3);
+  align-items: flex-start;
+}
+
+.axis-loadout-name {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-loadout-itemhead {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--axis-space-3);
+}
+
+.axis-loadout-count {
+  font-size: var(--axis-type-num-hud);
+  color: var(--axis-accent-text);
+}
+
+.axis-loadout-empty {
+  border-style: dashed;
+}
+
+.axis-loadout-drawer {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Avatars ───────────────────────────────────────────────────────────── */
+
+.axis-avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--axis-space-3);
+}
+
+.axis-avatar-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--axis-space-2);
+  padding: var(--axis-space-3);
+  background: var(--axis-surface);
+  border: var(--axis-keyline) solid var(--axis-ink);
+  box-shadow: var(--axis-shadow-tight);
+  cursor: pointer;
+  touch-action: manipulation;
+  min-height: 44px;
+}
+
+.axis-avatar-tile[data-owned="0"] {
+  cursor: not-allowed;
+  background: var(--axis-structural);
+}
+
+/* Selected: accent border, DOUBLE key-line weight, AND a corner notch. Three
+   channels, so it never depends on colour. */
+.axis-avatar-tile[data-equipped="1"] {
+  border-color: var(--axis-accent);
+  border-width: calc(var(--axis-keyline) * 3);
+  clip-path: polygon(0 0, 100% 0, 100% 88%, 88% 100%, 0 100%);
+}
+
+.axis-avatar-figure {
+  width: 100%;
+  max-width: 96px;
+  aspect-ratio: 1;
+}
+
+.axis-avatar-name {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  color: var(--axis-text);
+}
+
+.axis-avatar-unlock {
+  color: var(--axis-text-dim);
+}
+
+.axis-avatar-lockmark {
+  position: absolute;
+  top: var(--axis-space-2);
+  right: var(--axis-space-2);
+  color: var(--axis-text-dim);
+}
+
+.axis-avatar-detail,
+.axis-avatar-lifetime,
+.axis-avatar-challenge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-3);
+  align-items: flex-start;
+}
+
+.axis-avatar-detailname {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-l);
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-avatar-note,
+.axis-avatar-hint {
+  color: var(--axis-text-dim);
+}
+
+.axis-avatar-challenge {
+  width: 100%;
+}
+
+/* ─── Missions ──────────────────────────────────────────────────────────── */
+
+.axis-mission-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-3);
+}
+
+.axis-mission-sectionhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--axis-space-4);
+  flex-wrap: wrap;
+}
+
+.axis-mission-heading {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  letter-spacing: 0.16em;
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-mission-sectionhead .axis-glyph {
+  color: var(--axis-accent);
+  margin-inline: var(--axis-space-1);
+}
+
+.axis-mission-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-2);
+  padding: 0;
+  margin: 0;
+}
+
+.axis-mission {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-2);
+}
+
+.axis-mission-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--axis-space-3);
+  align-items: baseline;
+}
+
+/* The strike-through is the channel that survives any colour vision. */
+.axis-mission-label[data-complete="1"] {
+  text-decoration: line-through;
+  color: var(--axis-text-dim);
+}
+
+.axis-mission-done {
+  color: var(--axis-accent-text);
+}
+
+.axis-mission-progress {
+  color: var(--axis-text-dim);
+}
+
+.axis-mission-pending .axis-glyph {
+  color: var(--axis-accent);
+  margin-right: var(--axis-space-2);
+}
+
+/* ─── Settings ──────────────────────────────────────────────────────────── */
+
+.axis-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-4);
+}
+
+.axis-settings-heading {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-m);
+  letter-spacing: 0.16em;
+  color: var(--axis-text);
+  margin: 0;
+}
+
+.axis-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--axis-space-5);
+  flex-wrap: wrap;
+}
+
+.axis-settings-rowtext {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-1);
+  max-width: 46ch;
+}
+
+.axis-settings-hint,
+.axis-settings-note {
+  font-size: var(--axis-type-label);
+  color: var(--axis-text-dim);
+}
+
+.axis-settings-choices {
+  display: flex;
+  gap: var(--axis-space-2);
+}
+
+.axis-bindings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--axis-space-3);
+  margin: 0;
+}
+
+.axis-binding {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--axis-space-3);
+  border-bottom: var(--axis-keyline) solid var(--axis-structural);
+  padding-bottom: var(--axis-space-2);
+}
+
+.axis-binding dt,
+.axis-binding dd {
+  margin: 0;
+}
+
+.axis-binding-keys {
+  color: var(--axis-text);
+  font-size: var(--axis-type-num-body);
+}
+
+.axis-settings-repairs {
+  margin: 0;
+  padding-left: var(--axis-space-5);
+  color: var(--axis-text-dim);
+}
+
+/* ─── Leaderboard ───────────────────────────────────────────────────────── */
+
+.axis-board {
+  width: 100%;
+  border-collapse: collapse;
+  border: var(--axis-keyline) solid var(--axis-ink);
+}
+
+.axis-board th,
+.axis-board td {
+  padding: var(--axis-space-3);
+  text-align: left;
+  border-bottom: var(--axis-keyline) solid var(--axis-structural);
+  color: var(--axis-text);
+}
+
+.axis-board thead th {
+  background: var(--axis-structural);
+}
+
+.axis-board-numcol {
+  text-align: right;
+}
+
+.axis-board tr[data-self="1"] td {
+  background: var(--axis-surface);
+}
+
+.axis-board-notice,
+.axis-board-empty {
+  padding: var(--axis-space-4);
+}
+
+/* ─── Pause ─────────────────────────────────────────────────────────────── */
+
+/* The body is a 1120px column; without centring the plate sits at its left edge
+   rather than in the middle of the screen. */
+.axis-pause .axis-screen-body {
+  align-items: center;
+}
+
+.axis-pause-plate {
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-4);
+}
+
+.axis-pause-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--axis-space-2);
+}
+
+.axis-pause-note {
+  font-size: var(--axis-type-label);
+  color: var(--axis-text-dim);
+}
+
+/* ─── The shutter ───────────────────────────────────────────────────────── */
+
+/*
+ * Two pulls of one squeegee. `--axis-wipe` runs 0 -> 1 while covering and back
+ * while revealing; `useTransition.ts` writes it every frame onto `.axis-router`.
+ *
+ * The KEY layer leads the INK layer by `registerLeadTicks` and sits 3px off
+ * register — a two-colour screen print is never in perfect register, and that
+ * misalignment is the tell this whole transition is built around.
+ */
+.axis-shutter {
+  position: fixed;
+  inset: 0;
+  z-index: var(--axis-z-shutter);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.axis-shutter-ink,
+.axis-shutter-key {
+  position: absolute;
+  inset: -4px;
+  /* A hard-edged bar with an angled leading edge — the squeegee, not a fade. */
+  clip-path: polygon(
+    calc(var(--axis-wipe, 0) * 220% - 120%) 0,
+    calc(var(--axis-wipe, 0) * 220% - 20%) 0,
+    calc(var(--axis-wipe, 0) * 220% - 4%) 100%,
+    calc(var(--axis-wipe, 0) * 220% - 104%) 100%
+  );
+}
+
+.axis-shutter-ink {
+  background: var(--axis-accent);
+}
+
+.axis-shutter-key {
+  background: var(--axis-ink);
+  /* Ahead of the colour, and off register. */
+  transform: translate(
+    var(--axis-register-offset, 3px),
+    calc(var(--axis-register-offset, 3px) * -1)
+  );
+  clip-path: polygon(
+    calc(var(--axis-wipe, 0) * 232% - 120%) 0,
+    calc(var(--axis-wipe, 0) * 232% - 20%) 0,
+    calc(var(--axis-wipe, 0) * 232% - 4%) 100%,
+    calc(var(--axis-wipe, 0) * 232% - 104%) 100%
+  );
+}
+
+/* ─── Loading ───────────────────────────────────────────────────────────── */
+
+.axis-loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: var(--axis-space-4);
+  background: var(--axis-ground);
+  text-align: center;
+}
+
+/* ─── Mobile — designed and tested at 375px ─────────────────────────────── */
+
+@media (max-width: 720px) {
+  :root {
+    --axis-type-display-xxl: 56px;
+    --axis-type-display-xl: 36px;
+    --axis-type-display-l: 24px;
+    --axis-type-display-m: 18px;
+    --axis-type-num-hero: 40px;
+    --axis-type-num-hud: 20px;
+  }
+
+  .axis-ring {
+    --axis-ring-size: 88px;
+  }
+
+  .axis-hud-top {
+    /* Score moves off centre on mobile so it clears a notch, and sits beside
+       the pause chip rather than under it. */
+    left: auto;
+    right: auto;
+    transform: none;
+    margin-left: calc(56px + var(--axis-space-3));
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  /*
+   * The header wraps to two rows.
+   *
+   * `space-between` across back / title / currency does not fit in 375px: the
+   * centred title ran straight through "40,000 ◈ 9" on every shop-side screen.
+   * Back and title share the first row, the currency takes the second.
+   */
+  .axis-screen-head {
+    flex-wrap: wrap;
+    row-gap: var(--axis-space-2);
+  }
+
+  .axis-screen-title {
+    order: 2;
+    flex: 1 1 auto;
+    text-align: left;
+    letter-spacing: 0.1em;
+  }
+
+  .axis-screen-aside {
+    order: 3;
+    flex: 1 0 100%;
+    justify-content: flex-start;
+  }
+
+  .axis-screen-spacer {
+    width: 0;
+  }
+
+  .axis-avatar-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .axis-loadout {
+    grid-template-columns: 1fr;
+  }
+
+  .axis-shop-row {
+    grid-template-columns: 1fr;
+  }
+
+  .axis-shop-row .axis-button {
+    grid-column: 1;
+    grid-row: auto;
+    width: 100%;
+  }
+
+  .axis-death-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  /* RETRY is full-width in the thumb zone. It is the only action that matters. */
+  .axis-death-actions .axis-button {
+    width: 100%;
+  }
+
+  .axis-title-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .axis-title-level {
+    width: 100%;
+  }
+
+  .axis-fracture {
+    width: 180px;
+    height: 180px;
+  }
+
+  .axis-board th,
+  .axis-board td {
+    padding: var(--axis-space-2);
+    font-size: var(--axis-type-label);
+  }
+}
+
+/* Landscape on a phone: vertical space is the scarce resource. */
+/*
+ * Landscape on a phone. Vertical space is the scarce resource.
+ *
+ * ## This block is a rewrite, and the first version was broken
+ *
+ * A phone in landscape is **812x375** — wider than the 720px mobile breakpoint,
+ * so none of the compact type sizes above applied. A 96px wordmark and seven
+ * stacked buttons landed in a 375px-tall viewport, and because the title body
+ * is centred, the overflow was clipped off the **top** where centred flex
+ * content cannot be scrolled to. The screenshot showed a menu beginning at SHOP
+ * with RUN unreachable — the game was unplayable in landscape and nothing had
+ * ever looked at it. That is what an untested media query buys you.
+ *
+ * So this block sets its own type scale rather than inheriting one, lays the
+ * title out as brand-left / menu-right to use the width it actually has, and
+ * anchors overflowing content to the top so it can always be reached.
+ */
+@media (max-height: 540px) and (orientation: landscape) {
+  :root {
+    --axis-type-display-xxl: 44px;
+    --axis-type-display-xl: 32px;
+    --axis-type-display-l: 22px;
+    --axis-type-display-m: 16px;
+    --axis-type-num-hero: 36px;
+    --axis-type-num-hud: 18px;
+  }
+
+  .axis-screen {
+    gap: var(--axis-space-2);
+  }
+
+  .axis-screen-body {
+    gap: var(--axis-space-3);
+    padding-bottom: var(--axis-space-5);
+  }
+
+  /* Centred content that overflows is content you cannot scroll to. */
+  .axis-screen[data-overlay="1"] {
+    place-content: flex-start center;
+  }
+
+  .axis-button {
+    padding-block: var(--axis-space-2);
+  }
+
+  /* Title: the wordmark and the menu sit side by side. */
+  .axis-title-column {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--axis-space-6);
+    width: 100%;
+  }
+
+  .axis-tagline {
+    display: none;
+  }
+
+  .axis-wordmark {
+    flex: 0 0 auto;
+    text-shadow: 4px 4px 0 var(--axis-accent);
+  }
+
+  .axis-title-menu {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--axis-space-2);
+  }
+
+  /* RUN spans both columns — it is not one option among seven. */
+  .axis-title-run {
+    grid-column: 1 / -1;
+    font-size: var(--axis-type-display-m);
+    padding-block: var(--axis-space-3);
+  }
+
+  .axis-title .axis-screen-body {
+    justify-content: flex-start;
+  }
+
+  .axis-title-foot {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  /* Death: the five beats have to fit without scrolling past RETRY. */
+  .axis-death-stats {
+    gap: var(--axis-space-4);
+  }
+
+  .axis-death-actions {
+    flex-direction: row;
+  }
+
+  .axis-fracture {
+    width: 150px;
+    height: 150px;
+  }
+}
+
+/* ─── Reduced motion ────────────────────────────────────────────────────── */
+
+/*
+ * The ring's idle pulse is ambient and goes. The shutter does NOT — a screen
+ * changing with no transition at all is a state change the player can miss
+ * entirely, so it shortens to `--axis-motion-fast` via the token instead.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .axis-ring[data-pulse="1"] {
+    animation: none;
+  }
+}
+
+:root[data-motion="reduced"] .axis-ring[data-pulse="1"] {
+  animation: none;
+}

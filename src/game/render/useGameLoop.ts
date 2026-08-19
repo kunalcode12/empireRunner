@@ -74,8 +74,20 @@ import type { SpeedLinesHandle } from "./feel/SpeedLines";
 import { createFeel, handleFeelEvent, resetFeel, stepFeel, type FeelState } from "./feel";
 import { emitFootDust, emitOverdriveTrail } from "./vfx/emitters";
 import { nearestHazardX } from "./animation/procedural";
-import { F } from "@/game/sim/state";
-import { createAudioDirector, type AudioDirector } from "@/game/audio";
+import { F, RunStatus } from "@/game/sim/state";
+import { acquireAudioDirector, type AudioDirector } from "@/game/audio";
+import { SimEvent } from "@/game/sim/events";
+import {
+  buildRunSummary,
+  createRunRecorder,
+  recordEvent,
+  recordFlow,
+  resetRunRecorder,
+  type RunRecorder,
+  type RunSummary,
+} from "@/game/meta";
+import { NULL_HUD_SINK, type HudSink } from "./hud-sink";
+import { getScore, scoreMultiplier, shardCostFor } from "@/game/sim/scoring";
 
 /** Everything the loop drives. All refs; all mutated, never re-rendered. */
 export interface GameLoopRefs {
@@ -95,6 +107,30 @@ export interface GameLoopOptions {
   onEvent?: EventListener;
   /** Suspends ticking without unmounting. Pause, or a lost window focus. */
   paused?: boolean;
+  /**
+   * The HUD.
+   *
+   * Structurally typed and declared in `hud-sink.ts` — this layer never names
+   * anything in `src/ui/`, and `src/app` performs the assignment. See that file
+   * for why the dependency has to point this way.
+   */
+  hud?: HudSink;
+  /**
+   * Called once when the run ends, with the finished summary.
+   *
+   * This is the sim -> meta handoff. P13 built the whole settlement path and
+   * left it deliberately unreachable; the death screen is what consumes this.
+   */
+  onRunEnd?: (summary: RunSummary) => void;
+  /**
+   * Shards the player brought in.
+   *
+   * GAME_BIBLE §12 cause 6 makes a run end on a fatal hit with 0 Shards held,
+   * and `tryArmFracture` enforces that — but until P14 the sim started every run
+   * at zero regardless of what the player had banked, so a Fracture was
+   * unreachable unless they picked a Shard up mid-run. See `sim.RunOptions`.
+   */
+  startingShards?: number;
 }
 
 /** The mutable machine behind the loop. Lives in a ref, never in React state. */
@@ -119,7 +155,28 @@ interface Engine {
   feelContext: { playerX: number; playerY: number; playerZ: number; landingSpeed: number };
   /** Scratch for the face-local -> world conversion. */
   worldPos: { x: number; y: number; z: number };
+  /**
+   * The run recorder.
+   *
+   * ARCHITECTURE §3 names this as the ONE exception to "meta runs no logic
+   * during a run": it counts events inside the frame loop because
+   * `bitsCollected`, `nearMisses` and `peakFlow` are not `SimState` fields and
+   * the event ring holds 256 entries, so by run end the data is gone rather than
+   * merely awkward to reach. It allocates nothing, decides nothing, and has no
+   * economy import.
+   */
+  recorder: RunRecorder;
+  /** True once `onRunEnd` has fired. A run settles exactly once. */
+  ended: boolean;
+  /** ms — when the HUD was last written. Gates DOM writes to `hudPushHz`. */
+  lastHudPush: number;
+  /** Last Overdrive state pushed, so the inversion is not re-applied per frame. */
+  overdriveShown: boolean;
+  /** Last paused state pushed, so the dim is not re-applied every frame. */
+  pausedShown: boolean;
 }
+
+const MS_PER_SECOND = 1000;
 
 export type GameLoopApi = React.MutableRefObject<Engine | null>;
 
@@ -144,7 +201,7 @@ export type GameLoopApi = React.MutableRefObject<Engine | null>;
  * catch, and it would be genuinely wrong here since it is null on first paint.
  */
 export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameLoopApi {
-  const { seed, onEvent, paused = false } = options;
+  const { seed, onEvent, paused = false, hud, onRunEnd, startingShards = 0 } = options;
 
   const engineRef = useRef<Engine | null>(null);
 
@@ -163,6 +220,34 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     listenerRef.current = onEvent;
   }, [onEvent]);
 
+  // Same treatment for the HUD and the run-end callback: held behind refs and
+  // refreshed in an effect, so swapping either never tears the engine down and
+  // restarts the run mid-play.
+  const hudRef = useRef<HudSink>(NULL_HUD_SINK);
+  useEffect(() => {
+    hudRef.current = hud ?? NULL_HUD_SINK;
+  }, [hud]);
+
+  const runEndRef = useRef<((summary: RunSummary) => void) | undefined>(undefined);
+  useEffect(() => {
+    runEndRef.current = onRunEnd;
+  }, [onRunEnd]);
+
+  // Read once, at construction, and deliberately NOT a dependency of the mount
+  // effect. Settlement credits Shards while the death screen is up and the
+  // canvas is still mounted on the same seed; if this were a dependency, that
+  // credit would tear the engine down and restart the run the player just
+  // finished. The next run picks up the new balance because `startRun` changes
+  // the seed, which IS a dependency.
+  //
+  // Written in an effect rather than during render. Effects inside one component
+  // run in declaration order, so this one lands before the engine effect below
+  // and the value is already correct when the sim is constructed.
+  const shardsRef = useRef(startingShards);
+  useEffect(() => {
+    shardsRef.current = startingShards;
+  }, [startingShards]);
+
   // Built once, after mount. Input sources need the DOM, which is another reason
   // this cannot happen during render.
   useEffect(() => {
@@ -178,16 +263,21 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     ]);
 
     const engine: Engine = {
-      sim: createSim(seed),
+      sim: createSim(seed, { shards: shardsRef.current }),
       clock: createClock(),
       drain: createEventDrain(),
       view: createRenderView(),
       frames: 0,
       input: manager,
-      audio: createAudioDirector(),
+      audio: acquireAudioDirector(),
       feel: createFeel(),
       feelContext: { playerX: 0, playerY: 0, playerZ: 0, landingSpeed: 0 },
       worldPos: { x: 0, y: 0, z: 0 },
+      recorder: createRunRecorder(),
+      ended: false,
+      lastHudPush: 0,
+      overdriveShown: false,
+      pausedShown: false,
     };
 
     // Subscribed through a ref so changing the listener does not tear the engine
@@ -202,10 +292,57 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       // Audio before the external listener, for the same reason feel is: it is
       // a first-class consumer of the ring, not an observer of one.
       engine.audio.handleEvent(event);
+
+      // The meta recorder. Counting only — see the field comment on `recorder`.
+      recordEvent(engine.recorder, event.type, event.payload0);
+
+      // Discrete HUD reactions. These are NOT rate-limited: a near-miss kick or
+      // a theme swap arriving 66ms late is visible, and each is one attribute
+      // write rather than a layout-triggering counter update.
+      const sink = hudRef.current;
+      switch (event.type) {
+        case SimEvent.NearMiss:
+          sink.nearMiss();
+          break;
+        case SimEvent.FlowGain:
+          sink.flowGain(event.payload0);
+          break;
+        case SimEvent.OverdriveStart:
+          sink.setOverdrive(true);
+          engine.overdriveShown = true;
+          break;
+        case SimEvent.OverdriveEnd:
+          sink.setOverdrive(false);
+          engine.overdriveShown = false;
+          break;
+        case SimEvent.ThemeChange:
+          sink.setTheme(event.payload0);
+          break;
+        case SimEvent.FractureTick:
+          // payload1 = fraction remaining, payload2 = the one clearing verb.
+          //
+          // `fracturesUsed` has ALREADY been incremented by `tryArmFracture` by
+          // the time the window is ticking, so the cost that was actually
+          // charged is the one for the previous index — not the next.
+          sink.setFracture({
+            fraction: event.payload1,
+            verb: event.payload2,
+            shardCost: shardCostFor(Math.max(0, engine.sim.getState().fracturesUsed - 1)),
+          });
+          break;
+        case SimEvent.FractureResolve:
+          sink.setFracture(null);
+          break;
+        default:
+          break;
+      }
+
       listenerRef.current?.(event);
     });
 
     resetFeel(engine.feel);
+    resetRunRecorder(engine.recorder);
+    hudRef.current.reset();
 
     engineRef.current = engine;
 
@@ -253,6 +390,14 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     // 1. Input — sampled once, immediately before the ticks it feeds.
     const intent: Readonly<Intent> = paused ? IDLE_INTENT : (engine.input?.poll() ?? IDLE_INTENT);
 
+    // 1b. The HUD dims while held. Pushed from the frame loop rather than from
+    //     a React effect so it lands on the same frame the ticks stop, not one
+    //     render later.
+    if (paused !== engine.pausedShown) {
+      engine.pausedShown = paused;
+      hudRef.current.setPaused(paused);
+    }
+
     // 2. Fixed-timestep ticks. `advance` owns the accumulator and the spiral
     //    guard; this loop never sees wall-clock time again after this line.
     const ticks = paused ? 0 : advance(engine.clock, delta);
@@ -291,6 +436,48 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     engine.feelContext.playerY = world.y;
     engine.feelContext.playerZ = world.z;
     engine.drain.drain(sim.events);
+
+    // 4a. The HUD, and the run-summary recorder.
+    //
+    //     Both read the INTERPOLATED view rather than raw `current`, for the
+    //     same reason the transforms do — a raw read stutters by a whole tick.
+    //     Flow is recorded every frame because `peakFlow` is a high-water mark
+    //     and sampling it at 15Hz would miss a spike that lasted three frames.
+    const state = sim.getState();
+    recordFlow(engine.recorder, view.flow);
+
+    const sink = hudRef.current;
+    const nowMs = performance.now();
+    if (nowMs - engine.lastHudPush >= MS_PER_SECOND / TUNING.ui.hudPushHz) {
+      engine.lastHudPush = nowMs;
+      sink.setScore(getScore(state));
+      sink.setDistance(view.distance);
+      sink.setBits(engine.recorder.bitsCollected);
+      sink.setFlow(view.flow);
+      sink.setMultiplier(scoreMultiplier(state));
+      sink.setFace(view.face);
+      sink.setShields(state.player.shields);
+    }
+
+    // 4c. Run end — the sim -> meta handoff, fired exactly once.
+    //
+    //     `runStatus` becomes `Ended` inside the tick above, and the death
+    //     screen needs a summary rather than a live state, because the sim is
+    //     about to be reset out from under it by the next run.
+    if (!engine.ended && state.runStatus === RunStatus.Ended) {
+      engine.ended = true;
+      sink.setFracture(null);
+      const summary = buildRunSummary(engine.recorder, {
+        distance: state.f[F.distance] ?? 0,
+        score: getScore(state),
+        bestCombo: state.bestCombo,
+        band: state.band,
+        elapsedSeconds: state.f[F.elapsed] ?? 0,
+        seed: sim.getSeed(),
+        shieldsHeld: state.player.shields,
+      });
+      runEndRef.current?.(summary);
+    }
 
     // 4b. Audio telemetry.
     //

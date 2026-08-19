@@ -56,6 +56,42 @@ import {
 const FIXED_DELTA = TUNING.sim.fixedDelta;
 const BASE_SPEED = TUNING.speed.baseSpeed;
 
+/**
+ * What the meta layer hands the sim at run start.
+ *
+ * ## Why this exists, and why it is exactly one field
+ *
+ * GAME_BIBLE §12 cause 6 ends a run on a fatal hit with `maxFracturesPerRun`
+ * spent **or 0 Shards held**, and `tryArmFracture` correctly refuses to arm when
+ * `player.shards` is short. But `player.shards` started every run at zero and was
+ * only ever fed by in-run pickups, so a player with fifty Shards banked could not
+ * Fracture unless they happened to collect one during that run. P13 flagged this
+ * for P14; this is the fix.
+ *
+ * It is one field on purpose. `Head Start` and `Flow Primer` (§9.2) would also
+ * belong here, and they are deliberately **not** implemented — see PROGRESS.md
+ * P14. Both change where the run begins, which changes what the generator emits,
+ * which means a submitted replay cannot be re-simulated from the seed alone. That
+ * is a replay-format decision and it belongs to P12, not to a UI phase.
+ *
+ * ⚠️ **The same caveat already applies to this field**, at smaller scale: a
+ * Fracture changes the run, so a server re-simulating a replay has to know the
+ * player could afford one. The replay header carries a seed and nothing else
+ * today. Recorded in PROGRESS.md as work P12 must not miss.
+ */
+export interface RunOptions {
+  /** Shards the player brought into the run. Clamped to a non-negative integer. */
+  readonly shards?: number;
+}
+
+/** Total, and never throws. A bad value becomes zero, not a broken comparison. */
+function normaliseShards(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.floor(value);
+}
+
 export interface Sim {
   /** Advances exactly one fixed timestep. */
   tick(intent: Readonly<Intent>): void;
@@ -64,7 +100,7 @@ export interface Sim {
   /** The state as of the tick before that. Do not mutate. Render interpolates between them. */
   getPrevious(): SimState;
   /** Restores everything to run-start for `seed`. Allocates nothing. */
-  reset(seed: number): void;
+  reset(seed: number, options?: RunOptions): void;
   /** The event ring. The only channel out of the sim. */
   readonly events: EventRing;
   /** The seed this sim is currently running. */
@@ -80,9 +116,13 @@ export interface Sim {
  * two state buffers, the event ring, the RNG streams, the scratch intent — is
  * reused for the lifetime of the sim, including across `reset`.
  */
-export function createSim(seed: number): Sim {
+export function createSim(seed: number, options: RunOptions = {}): Sim {
   const normalizedSeed = seed >>> 0;
   let currentSeed = normalizedSeed;
+  // Sanitised once, here, rather than trusted at every read. A hostile or
+  // corrupt save reaching the sim as `NaN` shards would make every comparison
+  // in `tryArmFracture` false and silently disable Fracture for that player.
+  let startingShards = normaliseShards(options.shards);
 
   const current = createState();
   const previous = createState();
@@ -124,8 +164,11 @@ export function createSim(seed: number): Sim {
     state.rngCosmetic = serializeRng(cos) | 0;
   }
 
-  function reset(nextSeed: number): void {
+  function reset(nextSeed: number, nextOptions?: RunOptions): void {
     currentSeed = nextSeed >>> 0;
+    if (nextOptions !== undefined) {
+      startingShards = normaliseShards(nextOptions.shards);
+    }
     deriveSeeds(currentSeed);
 
     resetState(current, seeds);
@@ -133,6 +176,12 @@ export function createSim(seed: number): Sim {
     resetEventRing(events);
     resetSpawnState(spawnState);
     loadRngFromState(current);
+
+    // Applied to BOTH snapshots. `previous` is what the renderer interpolates
+    // from on frame one, and a mismatch between the two would show as the shield
+    // pips flickering on the first frame of every run.
+    current.player.shards = startingShards;
+    previous.player.shards = startingShards;
 
     current.runStatus = RunStatus.Running;
     previous.runStatus = RunStatus.Running;

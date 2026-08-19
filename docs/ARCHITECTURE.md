@@ -87,10 +87,19 @@ axis/
 │   │       └── intent.ts       normalises all three -> { verb, tickIssued }
 │   │
 │   └── ui/                     DOM only. No three.js imports, ever.
-│       ├── tokens.css          design tokens: palettes, type scale, spacing
-│       ├── hud/                Flow meter, score, distance, Overdrive prompt
-│       ├── screens/            menu, loadout, store, missions, death screen
-│       └── components/         buttons, rolling numerals, meters
+│       ├── tokens.css          design tokens: colour roles, type, spacing, motion
+│       ├── styles.css          every component's rules. No hex values.
+│       ├── theme.ts            writes the active theme's roles onto <html>
+│       ├── fonts.ts + fonts/   Anton, Martian Mono, Archivo — self-hosted woff2
+│       ├── motion.ts           the motion scale, in whole 60Hz sim ticks
+│       ├── hud/                THE AXIS RING, odometers, Fracture ring — all
+│       │                       imperative DOM; zero React renders during a run
+│       ├── screens/            title, death, shop, loadout, runners, missions,
+│       │                       settings, leaderboard, pause
+│       ├── transition/         the screen-print shutter and the screen stack
+│       ├── components/         Plate, Button, Meter, TierPips, StepSlider, Glyph
+│       ├── a11y/               focus trap, roving tabindex, gamepad nav
+│       └── state/              zustand: meta (run boundaries) and UI (screens)
 │
 ├── tests/
 │   ├── sim/                    determinism, replay hashing, tuning invariants
@@ -229,6 +238,8 @@ Hard rules, all enforced by ESLint import boundaries in P01:
 | `config/` imports nothing | It is leaf data. |
 | `input/` produces intents; it does not call into the sim | The sim pulls the intent queue at tick boundaries. |
 | `meta/` runs no economy or mission logic during a run | Economy and missions settle at run end, off the hot path. **One exception, added at P13:** the run-summary recorder in `meta/runSummary.ts` counts events inside the frame loop. It allocates nothing, decides nothing, and cannot reach a balance — there is no economy import in that file. It exists because `bitsCollected`, `nearMisses` and `peakFlow` are not fields in `SimState`, and the event ring holds only 256 entries, so by run end the data is gone rather than merely awkward to reach. |
+| `ui/` and `render/` never name each other. **`app/` is the seam.** | Added at P14. `ui/` may not import `render/` (lint), and `render/` may not import `ui/` (the arrow points down). So the run HUD is driven through an **output port**: `render/hud-sink.ts` declares a `HudSink` interface of setters, `src/ui/hud/Hud.tsx` returns a structurally identical object, and `src/app/play/page.tsx` — which sits above both — performs the one assignment where TypeScript checks the halves agree. No shared enum, so nothing can drift; duplicated sim constants have already caused two real bugs here (`ThemeChange` at P11, pickup kinds at P13). Every method is a setter returning `void`: a read would be a layout flush inside `useFrame`. |
+| The `AudioContext` is a **session** resource, not a per-mount one | Added at P14, after a real bug. `acquireAudioDirector()` hands out reference-counted handles onto one shared director, and teardown is deferred a tick so a React handover — which unmounts the outgoing tree *before* mounting the incoming one — does not pass through zero and destroy the graph. Building one per component meant the music died on every RUN press, because the new context's gesture listeners were armed after the click that would have unlocked them, and Chrome caps a page at roughly six contexts. The same reasoning applies to the WebGL context, which is now mounted once for the session. |
 | `audio/` and `meta/` may import sim **constants only** | `audio/` at P11, `meta/` at P13. The ring buffer is the sanctioned one-way channel from sim to presentation, and mapping an event to a sound — or to a mission counter — requires knowing the event and pickup kinds. The alternative is duplicate enums whose numeric values are part of the replay format, and that duplication is precisely what caused the `ThemeChange` bug found at P11. Read-only, downward, and neither layer can write to the sim. |
 
 ### 3.1 Where state lives

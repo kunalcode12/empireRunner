@@ -1,38 +1,59 @@
-# `src/ui/` — DOM only
+# `src/ui/` — the DOM half of the game
 
-**Never imports `three` or `@react-three/*`.** Enforced by `eslint.config.mjs`.
+Shipped at **P14**. Design tokens, the run HUD, nine screens, the transition, and the
+accessibility layer. No `three`, no `@react-three/*`, ever — enforced by
+`eslint.config.mjs`, because a canvas-rendered HUD costs draw calls the budget in
+[TUNING.md](../../docs/TUNING.md) §14 does not have.
 
-The HUD is DOM because a canvas-rendered HUD costs draw calls the budget in
-[docs/TUNING.md §14](../../../docs/TUNING.md) does not have.
+## Files
 
-## Belongs here
-
-- `tokens.css` — design tokens: palettes, type scale, spacing
-- `hud/` — Flow meter, score, distance, Overdrive prompt
-- `screens/` — menu, loadout, store, missions, death screen
-- `components/` — buttons, rolling numerals, meters
-
-## Does NOT belong here
-
-- `three`, `@react-three/*`, `postprocessing`, `r3f-perf`, or anything from `game/render/`
-- Per-frame state. HUD values are pushed from the render loop at **≤ 15Hz** — the eye cannot
-  read a number changing at 60Hz, and pushing at 60Hz re-renders the whole HUD tree 60 times a
-  second for nothing.
-- Hard-coded colours. Everything comes from `tokens.css`, never from Tailwind's default
-  palette — that palette is not the theme palette.
-
-## Type rules
-
-| Role | Face |
+| Path | What lives there |
 |---|---|
-| Display | Heavy condensed grotesque |
-| **Every numeral in the game** | Wide monospace |
-| Body | Clean sans |
+| `tokens.css` | Colour roles, type scale, spacing, motion, layers, safe areas |
+| `styles.css` | Every component's rules. **No hex values below `tokens.css`.** |
+| `theme.ts` | Writes the active theme's roles onto `<html>` on `ThemeChange` |
+| `fonts.ts` · `fonts/` | Anton, Martian Mono, Archivo — self-hosted woff2 + OFL |
+| `motion.ts` | The motion scale, in whole 60Hz sim ticks, plus the sim's easings |
+| `hud/` | THE AXIS RING, the odometers, the Fracture ring, the Flow popups |
+| `screens/` | Title, death, shop, loadout, runners, missions, settings, leaderboard, pause |
+| `transition/` | The screen-print shutter, its clock, and the screen stack |
+| `components/` | Plate, Button, Meter, TierPips, StepSlider, Glyph, Halftone |
+| `a11y/` | Focus trap, roving tabindex, gamepad navigation, colourblind mode |
+| `state/` | zustand: meta state (run boundaries) and UI state (screens, settings) |
+| `CommitCounter.tsx` | The render counter the "zero re-renders" budget is measured with |
 
-Numbers **roll like a mechanical counter** — digits translate vertically, the way an odometer
-moves. They never fade in, never scale-pop, never count up with an easing tween.
+## THE AXIS RING
 
-## The ban
+The Flow meter is a **square**, and that is the signature of this interface.
 
-Near-black + neon cyan/magenta + glowing perspective grid is banned here too — menus, HUD,
-death screen, store, loading state, favicon. [GAME_BIBLE §11.3](../../../docs/GAME_BIBLE.md).
+Every other game's meter is a circle, and a circle says nothing about *this* game. AXIS is a
+four-face square prism ([GAME_BIBLE.md](../../docs/GAME_BIBLE.md) §3.1), so the meter has four
+sides, one per face — the HUD is a diagram of the level rather than a widget over it. It reads
+better in peripheral vision than an arc for a mechanical reason: 25/50/75/100% land exactly on
+the corners, and "the ink turned the corner" is a discrete event the periphery can catch, while
+an arc's fill is a continuous quantity it cannot read at all.
+
+The side representing the face currently under the player's feet is drawn at double key-line
+weight, so the element carries **two facts in one shape**.
+
+## Three rules that keep this honest
+
+- **The HUD renders once and never again.** Every value change during a run is a
+  `setAttribute` or a `style.transform` on a node created at mount. There is no `useState` in
+  `hud/` and there must never be one. `tests/e2e/ui.spec.ts` counts renders across a live run
+  and asserts **zero**, using a checkpoint the app marks at the exact instant the run ends.
+- **No hex value appears outside `tokens.css` and `config/themes.ts`.** Every surface, rule,
+  glyph and label resolves to an `--axis-*` role, and `tests/ui/contrast.test.ts` recomputes
+  every text pair from the registry. A hex typed into a component is invisible to that test.
+- **`ui/` and `render/` never name each other.** The HUD is driven through an output port
+  declared in `render/hud-sink.ts` and implemented structurally here; `app/play/page.tsx` is
+  the one place they meet, and the one place the compiler checks they agree.
+
+## Banned in this folder
+
+`backdrop-filter`, blurred `box-shadow`, `opacity` transitions, `border-radius` on a plate, and
+any gradient without hard stops. These are §11.1's "no soft gradients" and "deep shadow with a
+hard edge" wearing DOM clothing, and `tests/ui/tokens.test.ts` greps for every one of them.
+
+Full art direction: [GAME_BIBLE.md](../../docs/GAME_BIBLE.md) §11. Numbers:
+[TUNING.md](../../docs/TUNING.md) §18.

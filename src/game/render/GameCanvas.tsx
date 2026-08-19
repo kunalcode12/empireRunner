@@ -33,12 +33,28 @@ import { TUNING } from "@/game/config/tuning";
 import { Scene } from "./Scene";
 import { getQuality } from "./perf/quality";
 import type { EventListener } from "./events";
+import type { HudSink } from "./hud-sink";
+import type { RunSummary } from "@/game/meta";
 import { LoadingScreen } from "@/ui/screens/LoadingScreen";
 
 export interface GameCanvasProps {
   seed?: number;
   onEvent?: EventListener;
   paused?: boolean;
+  /**
+   * The HUD, as an imperative sink.
+   *
+   * Typed by `hud-sink.ts` in this layer and implemented in `src/ui/`, which may
+   * not import from here. `src/app/play/page.tsx` is where the two meet and
+   * where the compiler checks they agree.
+   */
+  hud?: HudSink;
+  /** Fired once when the run ends, with the finished summary. */
+  onRunEnd?: (summary: RunSummary) => void;
+  /** Shards the player brought into the run. */
+  startingShards?: number;
+  /** `title` renders the attract diorama instead of a playable run. */
+  mode?: "play" | "title";
 }
 
 const DEFAULT_SEED = 1;
@@ -47,6 +63,10 @@ export function GameCanvas({
   seed = DEFAULT_SEED,
   onEvent,
   paused,
+  hud,
+  onRunEnd,
+  startingShards,
+  mode,
 }: GameCanvasProps): React.ReactElement {
   const quality = getQuality();
 
@@ -58,7 +78,7 @@ export function GameCanvas({
   }, [quality.pixelRatioCap]);
 
   return (
-    <div className="absolute inset-0" style={{ background: "var(--axis-bg)" }}>
+    <div className="absolute inset-0" style={{ background: "var(--axis-ground)" }}>
       <Suspense fallback={<LoadingScreen />}>
         <Canvas
           dpr={dpr}
@@ -90,7 +110,15 @@ export function GameCanvas({
             }
           }}
         >
-          <Scene seed={seed} onEvent={onEvent} paused={paused} />
+          <Scene
+            seed={seed}
+            onEvent={onEvent}
+            paused={paused}
+            hud={hud}
+            onRunEnd={onRunEnd}
+            startingShards={startingShards}
+            mode={mode}
+          />
         </Canvas>
       </Suspense>
     </div>

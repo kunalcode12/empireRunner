@@ -633,13 +633,29 @@ Four themes. A run **transitions between them at distance milestones**, passing 
 
 ### 11.2 Typography
 
-| Role | Face | Rule |
-|---|---|---|
-| Display | Heavy condensed grotesque | Titles, theme cards, verb prompts |
-| **All numerals** | Wide monospace | Score, distance, Bits, Shards, multiplier, timers — **every digit in the game** |
-| Body | Clean sans | Menus, mission text, settings |
+| Role | Face | Shipped at P14 | Rule |
+|---|---|---|---|
+| Display | Heavy condensed grotesque | **Anton** | Titles, theme cards, verb prompts |
+| **All numerals** | Wide monospace | **Martian Mono** | Score, distance, Bits, Shards, multiplier, timers — **every digit in the game** |
+| Body | Clean sans | **Archivo** | Menus, mission text, settings |
+
+All three are SIL OFL 1.1, self-hosted as latin-subset `.woff2` in `src/ui/fonts/`
+and loaded with `next/font/local` — 77KB total, no network at build or at runtime.
+See that folder's `OFL.txt` and the rationale in `src/ui/fonts.ts`.
+
+**Why these and not the obvious ones.** Orbitron, Rajdhani and Michroma are what
+"arcade UI" produces by default, and they are *sci-fi* faces. This is a **print**
+brief. Anton is a poster face drawn for one-colour screen-printed billboards;
+Martian Mono is genuinely wide monospace, which is rarer than it sounds, and
+tabular by construction so a rolling digit cannot reflow the line.
 
 Numbers **roll like a mechanical counter** — digits translate vertically, the way a fuel pump or an odometer moves. They never fade, never scale-pop, never count up with an easing tween. A score that ticks over should sound and look like a machine.
+
+**DECISION — the numeral faces load with `display: "block"`, not `"swap"`.**
+Every numeral in the game is tabular. Swapping in a fallback would reflow the
+entire HUD mid-run when the real face arrived, and a score that jumps sideways
+reads as a bug. A ~100ms block on a 23KB file is the better trade. Body text uses
+`swap`, where a reflow costs nothing.
 
 ### 11.3 EXPLICITLY FORBIDDEN
 

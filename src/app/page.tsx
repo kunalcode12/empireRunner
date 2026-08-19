@@ -1,34 +1,37 @@
+import Link from "next/link";
+
 /**
  * Landing shell.
  *
- * No canvas here — the game mounts at /play behind dynamic(..., { ssr: false })
- * from P05 onward. docs/ARCHITECTURE.md §6: Next.js is a shell, not the engine.
+ * No canvas here — the game mounts at /play behind `dynamic(..., { ssr: false })`.
+ * docs/ARCHITECTURE.md §6: Next.js is a shell, not the engine. This page is
+ * statically prerendered and pulls in no three.js, which is what keeps the
+ * marketing route's first-load JS near nothing.
  *
- * "Black" is the Kiln palette's key-line black (#0b0b0c), not #000000.
- * GAME_BIBLE §11.3 bans backgrounds darker than the active theme's darkest colour.
+ * "Black" is the key-line black `#0b0b0c`, which is the darkest colour in every
+ * theme's palette and therefore exactly at the GAME_BIBLE §11.3 limit rather
+ * than below it.
+ *
+ * **Retokenised at P14** — it read `--axis-fg` and `--axis-muted`, which the
+ * token pass renamed to the role names the rest of the interface uses.
  */
 export default function Home() {
   return (
     <main className="flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-6">
-      <h1
-        className="text-[clamp(4rem,22vw,16rem)] leading-none font-black tracking-[0.08em] uppercase"
-        style={{ fontFamily: "var(--axis-font-display)", color: "var(--axis-fg)" }}
-      >
+      <h1 className="axis-wordmark" style={{ fontSize: "clamp(4rem, 22vw, 16rem)" }}>
         AXIS
       </h1>
 
       <p
-        className="max-w-xl text-center text-sm tracking-[0.28em] uppercase"
-        style={{ fontFamily: "var(--axis-font-mono)", color: "var(--axis-muted)" }}
+        className="axis-label max-w-xl text-center"
+        style={{ letterSpacing: "0.28em", fontFamily: "var(--axis-font-mono)" }}
       >
         Four faces &middot; Twelve positions &middot; One wrong roll
       </p>
 
-      <span
-        aria-hidden="true"
-        className="mt-2 block h-[var(--axis-keyline-width)] w-24"
-        style={{ background: "var(--axis-accent)" }}
-      />
+      <Link href="/play" className="axis-button" data-variant="primary" data-block="0">
+        PLAY
+      </Link>
     </main>
   );
 }

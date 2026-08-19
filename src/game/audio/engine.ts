@@ -192,6 +192,15 @@ export function createAudioEngine(options: AudioEngineOptions = {}): AudioEngine
   let latency: LatencyProbe = measureLatency(null);
   let disposed = false;
   let gestureArmed = false;
+  /**
+   * True while a suspend was our own idea.
+   *
+   * The difference between "the tab was backgrounded" and "a phone call took the
+   * audio device away" is not visible in `AudioContext.state` — both read
+   * `suspended`. This flag is the only thing that distinguishes them, and the
+   * two need opposite responses: leave one alone, fight to recover the other.
+   */
+  let suspendRequested = false;
   let readyCallbacks: ((buses: AudioBuses, context: AudioContext) => void)[] = [];
 
   /** The gain the master bus should sit at right now, mute included. */
@@ -265,11 +274,24 @@ export function createAudioEngine(options: AudioEngineOptions = {}): AudioEngine
   }
 
   /**
-   * The context left `running` without being asked to.
+   * The context left `running` **without being asked to**.
    *
    * Try an immediate resume — sometimes the interruption has already cleared and
    * it just works — and re-arm the gesture listeners either way, so the next tap
    * recovers. This is the phone-call path.
+   *
+   * ## `suspendRequested` is what makes "without being asked to" true
+   *
+   * Found at P14. `statechange` fires for a deliberate `suspend()` exactly as it
+   * does for an interruption, and this handler used to resume unconditionally.
+   * Once a context has been unlocked by a gesture, `resume()` generally succeeds
+   * with no further gesture — so backgrounding the tab faded the master to zero,
+   * suspended, and was immediately brought back. The tab kept an audio graph
+   * running in the background forever, which is precisely what the visibility
+   * handler exists to stop.
+   *
+   * It surfaced on mobile-chromium and not on desktop, which is the usual shape
+   * of a race: both were wrong, only one lost consistently.
    */
   const onStateChange = (): void => {
     if (context === null || disposed) {
@@ -279,6 +301,11 @@ export function createAudioEngine(options: AudioEngineOptions = {}): AudioEngine
     if (state === RUNNING) {
       disarmGestures();
       latency = measureLatency(context);
+      return;
+    }
+    if (suspendRequested) {
+      // We asked for this. `resume()` happens on the way back, from the
+      // visibility handler — not from here.
       return;
     }
     if (state === INTERRUPTED || state === "suspended") {
@@ -355,6 +382,9 @@ export function createAudioEngine(options: AudioEngineOptions = {}): AudioEngine
     if (context === null || stateOf(context) !== RUNNING) {
       return;
     }
+    // Set BEFORE the fade, not just before `suspend()`. The state can change
+    // under us during the wait, and `onStateChange` has to know it was us.
+    suspendRequested = true;
     const fade = fadeMaster(0);
     await afterFade(fade);
     if (context === null || disposed) {
@@ -368,9 +398,16 @@ export function createAudioEngine(options: AudioEngineOptions = {}): AudioEngine
   }
 
   async function resume(): Promise<boolean> {
+    // Cleared first: from here on, any departure from `running` is genuinely
+    // unrequested and the interruption path should handle it.
+    suspendRequested = false;
     const running = await unlock();
     if (running) {
       fadeMaster(targetMasterGain());
+    } else {
+      // The autoplay policy re-locked while we were away. Without this the
+      // listeners stay disarmed and audio never comes back at all.
+      armGestures();
     }
     return running;
   }

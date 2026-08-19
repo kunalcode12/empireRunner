@@ -1,17 +1,21 @@
 /**
  * The loading state.
  *
- * A real screen, not a spinner. A spinner says "something is happening";
- * this says what, and it holds the brand and the palette the moment the page
- * paints, so the first frame of the game is not a jarring change of subject.
+ * A real screen, not a spinner. A spinner says "something is happening"; this
+ * says what, and it holds the brand and the palette the moment the page paints,
+ * so the first frame of the game is not a jarring change of subject.
  *
  * DOM only. `src/ui/**` never imports `three` or `@react-three/*` — enforced by
  * eslint.config.mjs. That is also why this is safe to use as the Suspense
  * fallback around the canvas: it cannot pull the renderer into its own chunk.
  *
  * The animation is a key-line wipe rather than a rotating spinner because
- * GAME_BIBLE §11 is a print aesthetic — a spinning ring is a web-app idiom and
- * it would be the first thing on screen contradicting the whole art direction.
+ * GAME_BIBLE §11 is a print aesthetic — a spinning ring is a web-app idiom and it
+ * would be the first thing on screen contradicting the whole art direction.
+ *
+ * **Retokenised at P14.** It previously read `--axis-bg`, `--axis-fg` and
+ * `--axis-muted`, which the P14 token pass renamed to the role names every other
+ * component now uses.
  */
 
 export interface LoadingScreenProps {
@@ -21,35 +25,42 @@ export interface LoadingScreenProps {
 
 export function LoadingScreen({ detail }: LoadingScreenProps): React.ReactElement {
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="absolute inset-0 flex flex-col items-center justify-center gap-5"
-      style={{ background: "var(--axis-bg)" }}
-    >
+    <div role="status" aria-live="polite" className="axis-loading">
       <span
-        className="text-[clamp(2.5rem,12vw,7rem)] leading-none font-black tracking-[0.08em] uppercase"
-        style={{ fontFamily: "var(--axis-font-display)", color: "var(--axis-fg)" }}
+        className="axis-wordmark"
+        style={{ fontSize: "clamp(2.5rem, 12vw, 7rem)", textShadow: "none" }}
       >
         AXIS
       </span>
 
-      <span
-        className="text-xs tracking-[0.32em] uppercase"
-        style={{ fontFamily: "var(--axis-font-mono)", color: "var(--axis-muted)" }}
-      >
+      <span className="axis-label" style={{ letterSpacing: "0.32em" }}>
         {detail ?? "Building the tunnel"}
       </span>
 
       {/* A key-line that wipes left to right. Flat colour, hard edges, no glow. */}
       <span
         aria-hidden="true"
-        className="axis-loading-track relative block h-[var(--axis-keyline-width)] w-40 overflow-hidden"
-        style={{ background: "color-mix(in srgb, var(--axis-muted) 30%, transparent)" }}
+        className="axis-loading-track"
+        style={{
+          position: "relative",
+          display: "block",
+          height: "var(--axis-keyline)",
+          width: "160px",
+          margin: "0 auto",
+          overflow: "hidden",
+          background: "var(--axis-structural)",
+        }}
       >
         <span
-          className="axis-loading-bar absolute inset-y-0 left-0 block w-1/3"
-          style={{ background: "var(--axis-accent)" }}
+          className="axis-loading-bar"
+          style={{
+            position: "absolute",
+            insetBlock: 0,
+            left: 0,
+            display: "block",
+            width: "33%",
+            background: "var(--axis-accent)",
+          }}
         />
       </span>
     </div>
