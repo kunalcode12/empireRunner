@@ -42,7 +42,7 @@
  */
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RunSummary } from "@/game/meta";
 import { LoadingScreen } from "@/ui/screens/LoadingScreen";
 import { Halftone } from "@/ui/components/Halftone";
@@ -64,6 +64,7 @@ import { SettingsScreen } from "@/ui/screens/SettingsScreen";
 import { LeaderboardScreen } from "@/ui/screens/LeaderboardScreen";
 import { Screen, applyStoredSettings, useUiStore, type ScreenName } from "@/ui/state/uiStore";
 import { useMetaStore } from "@/ui/state/metaStore";
+import { submitRun } from "@/ui/state/runApi";
 
 const GameCanvas = dynamic(() => import("@/game/render/GameCanvas").then((mod) => mod.GameCanvas), {
   ssr: false,
@@ -80,6 +81,28 @@ export default function PlayPage(): React.ReactElement {
   const hydrate = useMetaStore((state) => state.hydrate);
   const ready = useMetaStore((state) => state.ready);
   const shards = useMetaStore((state) => state.balances.shards);
+
+  /*
+   * The run token, the Shards the SERVER quoted, and when the run began.
+   *
+   * `runShards` rather than the local `shards` balance is what the sim starts
+   * with, and that is not interchangeable: starting Shards are part of the
+   * simulated state and therefore part of the replay hash, so a client that used
+   * its own number would produce a run the server re-simulates differently and
+   * correctly rejects. The server owns the balance; the client is told it.
+   */
+  const runToken = useUiStore((state) => state.runToken);
+  const runShards = useUiStore((state) => state.runShards);
+  const runStartedAt = useUiStore((state) => state.runStartedAt);
+
+  /*
+   * Where the frame loop leaves the finished replay.
+   *
+   * A ref rather than part of `RunSummary` because the bytes run to ~105KB and
+   * the summary goes into React state — putting a six-figure byte array through
+   * the reconciler on every death would be real work for a value nothing renders.
+   */
+  const replayRef = useRef<Uint8Array | null>(null);
   const lifetime = useMetaStore((state) => state.lifetime);
 
   const [summary, setSummary] = useState<RunSummary | null>(null);
@@ -180,8 +203,27 @@ export default function PlayPage(): React.ReactElement {
       markRenderCheckpoint("run-end");
       setSummary(finished);
       go(Screen.Death);
+
+      /*
+       * Submit, fire and forget.
+       *
+       * Deliberately NOT awaited before the death screen shows. The player's own
+       * score is already correct and on screen; the server's number decides the
+       * leaderboard, not what they are told they scored. Blocking the death
+       * screen on a round trip would make every death feel like a network stall.
+       *
+       * A missing token means the run started offline and no place is possible.
+       * A null replay means the recorder overflowed past 30 minutes, in which
+       * case the bytes would re-simulate to a different hash and submitting them
+       * would report a genuine run as a forgery.
+       */
+      const replay = replayRef.current;
+      replayRef.current = null;
+      if (runToken !== null && replay !== null) {
+        void submitRun(runToken, replay, Date.now() - runStartedAt);
+      }
     },
-    [go],
+    [go, runToken, runStartedAt],
   );
 
   // Not just "a menu is open": a run also stays suspended until the theme it is
@@ -264,7 +306,9 @@ export default function PlayPage(): React.ReactElement {
           seed={seed}
           mode={isTitle ? "title" : "play"}
           paused={paused}
-          startingShards={shards}
+          // The SERVER's figure, not the local balance. See the note above.
+          startingShards={runToken === null ? shards : runShards}
+          replayRef={replayRef}
           // The seam. `HudController` and `HudSink` are structurally identical
           // and this line is where the compiler proves it.
           hud={hud ?? undefined}

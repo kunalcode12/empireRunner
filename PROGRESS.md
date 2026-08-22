@@ -27,7 +27,7 @@ Status values: `Not started` · `In progress` · `Gate failed` · `Complete`
 | **P09** | Fracture & cosmetic physics | ~~Death freeze, correct-verb solver, 1.2s slow-mo window, resume~~ (landed at P08); Rapier v2 debris and ragdolls; the palette inversion and Overdrive/Fracture visuals | Solver picks the single clearing verb; arms only on single-answer deaths; **Rapier never writes to sim** (boundary test) | Sim half **Complete** at P08 · render half Not started |
 | **P10** | Themes & art direction | Screen-print materials, key-lines, halftone, the four themes, transition tunnels, posterised fog | All four themes render at ≤ 6 colours; zero bloom outside Overdrive; the §11.3 ban holds under review; draw calls still in budget | **Complete** — 4 themes at 5 colours each, 21–23 draw calls, **0 textures**; 85 new theme tests; initial payload **314 KB of a 4MB budget**. Adding a fifth theme is a data change, enforced by a synthetic-fifth-theme test. **4 hazards still deferred from P07** — the skin mapping is registry data with nothing yet to skin. FPS unverified on real hardware (SwiftShader only). |
 | **P11** | Audio | Web Audio graph, buses, ducking, per-theme stems with cross-fade, pooled SFX voices | Stems stay sample-locked across a 10-minute run; no `<audio>` elements; voice pool never allocates mid-run | **Complete** — drift measured at **0 samples** over 120s; 0 `<audio>` elements; voice pool capped at 24, peak 4. Placeholders are synthesised, no assets. Silent switch + phone-call interruption unverifiable on the web platform / without a phone |
-| **P12** | Leaderboards & replay validation | API routes, submit/read, **server-side replay re-simulation**, weekly reset | A tampered score is rejected; a legitimate replay validates; server re-sim result === client result | Not started |
+| **P12** | Leaderboards & replay validation | API routes, submit/read, **server-side replay re-simulation**, weekly reset | A tampered score is rejected; a legitimate replay validates; server re-sim result === client result | **Complete** — 9 API routes, 102 server tests, **no new dependencies**. Validation p50 **2ms** / p99 **4ms** at 100 concurrent (p99 **12ms** on 30-minute replays); admission control sheds under flood. Found and fixed 3 bugs, including that the replay recorder had never been wired into the frame loop and that `verify()` rejected every run by a player holding Shards. **Storage is in-memory/file — a horizontally-scaled deploy needs a real adapter.** Account credential verification deferred; the route fails closed in production. |
 | **P13** | Meta systems | Economy, upgrade cost + effect curves, avatars, boosts, inventory, dailies, weekly contract, save + migrations | Cost/effect tables match GAME_BIBLE §8 exactly; save survives a schema migration; missions roll over at 00:00 UTC | **Complete** — 177 meta tests. Table snapshotted (and §8.2 corrected: two T5 cells were arithmetic slips). v1→v3 chain tested; corrupt-save recovery covers truncated JSON, wrong types and a future version. Dailies verified identical across 5 timezones. **Not wired to a run yet — that is P14.** |
 | **P14** | UI, HUD & juice | Menu, loadout, store, missions, HUD, death screen with the "you were 40m short" line, rolling numerals, auto-pause on blur | Full loop playable start→death→spend→restart; HUD pushes at ≤ 15Hz; death screen always shows the nearest unmet objective | **Complete** — full loop playable; **0 React renders** measured across a live run; a11y audit clean on 7 screens × 2 viewports (**not** a Lighthouse score — see below); 3 real bugs found in P11/P13 code. `settleRun` is now wired |
 | **P15** | Repair & ship hardening | Out-of-band. Fix a failed gate, or the final pass: perf sweep, budget enforcement, reduced-motion, a11y, error boundaries | Every budget in TUNING.md §14 green in CI; all five laws' tests green | Not started |
@@ -46,6 +46,143 @@ the touch layer as validated until someone puts a thumb on it.
 ---
 
 ## Build log
+
+### 2026-08-20 — P12 · Leaderboards & replay validation — **Complete**
+
+The trust boundary. Server-issued seeds, headless re-simulation, four boards, anonymous
+identity, cloud save and consent-gated telemetry — with **no new dependencies**. Every gate
+below was run; the output is pasted.
+
+**The threat model, and what actually answers it**
+
+Any leaderboard that accepts a client-reported score is topped within a day by someone typing a
+large number into a console. Two things close it, and both were needed:
+
+1. **The server re-runs the sim.** The client submits a seed and an input log; there is nowhere
+   in the wire format to put a score. The number on the board is the one `verify()` computed.
+2. **The server issues the seed.** Re-simulation alone leaves a quieter hole — generate ten
+   thousand layouts offline, find the one worth 400,000 points, submit a *genuine* replay of
+   it. Every check passes because nothing was forged; they simply chose the dice. Seeds are now
+   signed, single-use, session-bound and expire in fifteen minutes.
+
+**What shipped**
+
+- **`src/server/`** — the whole trust boundary, framework-free and testable without a listening
+  port: `token`, `submit`, `validation/{density,validate,queue}`, `leaderboard`, `identity`,
+  `save`, `telemetry`, `ratelimit`, `crypto`, `period`, `errors`, `http`, `store/`.
+- **`src/app/api/`** — nine routes, each a thin adapter: `run/start`, `run/submit`,
+  `leaderboard`, `leaderboard/rank`, `identity`, `identity/upgrade`, `identity/friends`,
+  `save`, `telemetry`. Any of them containing gameplay logic is a bug.
+- **Client wiring** — `ui/state/runApi.ts`, `beginRun()` in the ui store, and the submit call
+  in `app/play/page.tsx`.
+- **`docs/PRIVACY.md`** — the privacy note item 6 requires, describing the code rather than
+  aspirations, with its claims asserted in `tests/server/telemetry.test.ts`.
+
+**Zero new dependencies.** HMAC-SHA256 and `randomBytes` from `node:crypto`; storage behind a
+port with in-memory and JSON-file adapters. Nothing was installed.
+
+**Verify gate — `npm run test:load`, 100 concurrent submissions**
+
+| Replay length | Accepted | Shed (503) | p50 | p99 | max | Throughput |
+|---|---|---|---|---|---|---|
+| 1,800 ticks (30s), default queue | 65 | **35** | **2.0ms** | **4.0ms** | 4.0ms | 403/s |
+| 1,800 ticks, deep queue | 100 | 0 | **2.0ms** | **4.0ms** | 4.0ms | 409/s |
+| **108,000 ticks (30 min — the format maximum)** | 100 | 0 | **5.0ms** | **12.0ms** | 14.0ms | 175/s |
+
+The first row is the important one: 35 of 100 were **shed with a retry-after**, which is
+admission control working. An unbounded queue under load does not serve more people; it serves
+everybody a timeout, having first held all their sockets open.
+
+The third row is the worst case the format permits — a 105.5KB replay of a full thirty-minute
+run — and p99 is 12ms against a 2,000ms CPU budget. The budget has roughly two orders of
+magnitude of headroom, which is the honest reason a `worker_threads` pool was not built.
+
+**Verify gate — the full suite**
+
+```
+npx tsc --noEmit          clean
+npx eslint .              clean, including the new src/server boundary
+npm run format:check      clean
+npx vitest run            1,342 passed / 66 files   (102 new server tests)
+npm run build             clean; 9 dynamic API routes
+npm run check:payload     314.9 KB of 4MB  (7.7%)
+npx playwright test       70 passed
+npm run test:smoke        24/24 against a live server
+```
+
+**Every case the brief names, and where it is asserted**
+
+| Requirement | Test |
+|---|---|
+| A forged replay is rejected | `validation.test.ts` — altered inputs, forged hash, truncated, wrong version |
+| A valid replay validates | `validation.test.ts`, and end-to-end in `test:smoke` |
+| A replay from a different seed is rejected | `validation.test.ts` — both a wrong seed and a header edited to match |
+| A token cannot be reused | `validation.test.ts`, and a live 409 in `test:smoke` |
+| Superhuman input density is rejected | `validation.test.ts` — 60 direction changes/s against a 14/s ceiling |
+| Rate limits engage | `ratelimit.test.ts` — including that a rate-refused submission does **not** spend its token |
+| Sync never decreases currency | `save.test.ts` — seven cases, including a *newer* but poorer save |
+
+**Three bugs this phase found**
+
+1. **The replay recorder was never wired in.** P02 built `createRecorder`/`record` and nothing
+   in the frame loop had ever called them. A recorder nobody records into is a leaderboard
+   nobody can submit to — the entire anti-cheat was unreachable from the game.
+2. **`verify()` could not validate a run by a player holding Shards.** P14 added
+   `createSim(seed, { shards })` and `hashState` mixes `player.shards`, but `verify()` always
+   re-simulated with zero. **Every run by a player who had earned Shards would have verified as
+   a forgery**, and the more they had invested the more certainly they were called a cheat.
+   Fixed by putting starting Shards in the **signed token** rather than in the replay header —
+   a header field is a claim the client makes, and "I started with nine" is nine free deaths
+   for the asking.
+3. **A single flipped input byte is not a reliable forgery.** Found while writing the smoke
+   test, which failed on a tampered replay that validated. Correctly: an intent is a no-op if
+   the player is already in that lane, mid-roll-commit or airborne, so one byte can genuinely
+   produce the identical final state. The test was weak, not the verifier. It now rewrites a
+   200-tick span.
+
+**One layering-law catch worth recording.** The CPU budget was first written as a deadline
+timestamp checked inside `replay.ts`, and lint refused it — `Date.now()` is banned under
+`src/game/sim/`. That rule was right: a simulation that can observe how long it took is a
+simulation whose result can depend on the machine. The check is now a `shouldAbort()` callback
+the server owns, so the clock lives where the policy does.
+
+**Deliberately deferred, and why**
+
+- **A real datastore.** `Store` is a port with in-memory and JSON-file adapters, and neither is
+  production storage. The consequence is specific: **on serverless, each instance has its own
+  memory store, so nonces and boards do not agree across instances** — a token spent on one
+  instance is unspent on another. A single-node deployment is correct today; anything
+  horizontally scaled needs a Postgres or KV adapter with an atomic compare-and-set for
+  `consumeNonce`. That is an adapter, not a rewrite, and it needs a dependency that was not
+  approved.
+- **Credential verification for the account upgrade.** The seam is real and tested — the
+  `playerId` is preserved, which is the whole point — but `accountId` arrives as an opaque
+  trusted string. `/api/identity/upgrade` therefore **refuses in production** unless explicitly
+  overridden, because an unauthenticated account link is an account-takeover primitive and
+  shipping one behind a "TODO verify" comment is how that happens.
+- **`worker_threads`.** The brief allows "a worker **or** a queue". The queue was chosen because
+  a worker spawned from a Next route needs its own build output and is unavailable on most
+  serverless targets — it would work on a laptop and fail on deploy. The queue is portable,
+  achieves the same property, and sits behind an interface a worker pool can implement. The
+  p99 numbers above say the trade cost nothing.
+- **Per-IP limiting depends on the edge.** `x-forwarded-for` is client-settable, so the IP
+  bucket is only trustworthy behind a proxy that overwrites it. That is a deployment
+  requirement, not something the code can enforce.
+
+**Settled design question.** GAME_BIBLE §13 Q4 (leaderboard scope) is resolved: all-time,
+weekly, daily and friends. Daily was added over the default because a weekly board is
+unwinnable for a new player by Wednesday. Regional was rejected — it needs geolocation, which
+means retaining an IP for something other than rate limiting, and PRIVACY.md promises otherwise.
+
+**What the next phase needs**
+
+- The leaderboard screen still reads `ui/state/leaderboard.ts`, the **local** source from P14.
+  Pointing it at `/api/leaderboard` is a UI change and was outside this phase's scope; the
+  endpoint, the paging and the rank lookup are ready for it.
+- `npm run test:smoke` needs a server running (`npx next start -p 3111`). It is not in CI for
+  that reason, the same way `test:e2e` is not.
+
+---
 
 ### 2026-08-20 — P10 · Themes & art direction — **Complete**
 

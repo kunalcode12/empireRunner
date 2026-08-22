@@ -48,7 +48,7 @@ const MENU: readonly MenuEntry[] = [
 
 export function TitleScreen(): React.ReactElement {
   const go = useUiStore((state) => state.go);
-  const startRun = useUiStore((state) => state.startRun);
+  const beginRun = useUiStore((state) => state.beginRun);
   const balances = useMetaStore((state) => state.balances);
   const lifetime = useMetaStore((state) => state.lifetime);
 
@@ -72,7 +72,7 @@ export function TitleScreen(): React.ReactElement {
             variant="primary"
             block
             autoFocus
-            onClick={() => startRun()}
+            onClick={() => void beginRun()}
             className="axis-title-run"
           >
             RUN

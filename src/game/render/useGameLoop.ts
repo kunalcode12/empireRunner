@@ -78,6 +78,13 @@ import { F, RunStatus } from "@/game/sim/state";
 import { acquireAudioDirector, type AudioDirector } from "@/game/audio";
 import { SimEvent } from "@/game/sim/events";
 import {
+  createRecorder,
+  record as recordIntent,
+  resetRecorder,
+  serializeReplay,
+  type Recorder,
+} from "@/game/sim/replay";
+import {
   buildRunSummary,
   createRunRecorder,
   recordEvent,
@@ -150,6 +157,20 @@ export interface GameLoopOptions {
   fog?: THREE.Fog;
   /** The scene background, kept equal to the fog colour. */
   background?: THREE.Color;
+  /**
+   * Where the finished replay is left for the submit path.
+   *
+   * Written immediately BEFORE `onRunEnd` fires, so the handler can read it
+   * synchronously and post it. A ref rather than a summary field because the
+   * bytes are up to 105KB and `RunSummary` is passed into React state — putting
+   * a six-figure byte array through the reconciler on every death would be a
+   * real cost for a value nothing renders.
+   *
+   * `null` means there is nothing submittable: the run overflowed the 30-minute
+   * recorder, so its bytes would re-simulate to a different hash and the server
+   * would correctly call a genuine run a forgery.
+   */
+  replayRef?: React.MutableRefObject<Uint8Array | null>;
 }
 
 /** The mutable machine behind the loop. Lives in a ref, never in React state. */
@@ -185,6 +206,20 @@ interface Engine {
    * economy import.
    */
   recorder: RunRecorder;
+  /**
+   * The REPLAY recorder — one packed intent byte per tick.
+   *
+   * Not the same thing as `recorder` above, which counts events for the meta
+   * summary. This one is the anti-cheat: it is what `/api/run/submit` sends, and
+   * what the server re-simulates to compute the authoritative score.
+   *
+   * P02 built it and, until P12, nothing called it. A recorder nobody records
+   * into is a leaderboard nobody can submit to.
+   *
+   * It writes one byte into a buffer preallocated at `TUNING.replay.maxTicks`,
+   * so recording inside the tick loop allocates nothing and respects law (d).
+   */
+  replay: Recorder;
   /** True once `onRunEnd` has fired. A run settles exactly once. */
   ended: boolean;
   /** ms — when the HUD was last written. Gates DOM writes to `hudPushHz`. */
@@ -245,6 +280,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     director,
     fog,
     background,
+    replayRef: externalReplayRef,
   } = options;
 
   const engineRef = useRef<Engine | null>(null);
@@ -318,6 +354,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       feelContext: { playerX: 0, playerY: 0, playerZ: 0, landingSpeed: 0 },
       worldPos: { x: 0, y: 0, z: 0 },
       recorder: createRunRecorder(),
+      replay: createRecorder(seed),
       ended: false,
       lastHudPush: 0,
       overdriveShown: false,
@@ -417,6 +454,7 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
 
     resetFeel(engine.feel);
     resetRunRecorder(engine.recorder);
+    resetRecorder(engine.replay);
     hudRef.current.reset();
 
     engineRef.current = engine;
@@ -481,6 +519,10 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     //    guard; this loop never sees wall-clock time again after this line.
     const ticks = paused ? 0 : advance(engine.clock, delta);
     for (let i = 0; i < ticks; i += 1) {
+      // Recorded BEFORE the tick, so byte N is the intent tick N ran with. The
+      // server replays it the same way round; reversing either end silently
+      // shifts every input by one tick and nothing verifies again.
+      recordIntent(engine.replay, intent);
       sim.tick(intent);
     }
 
@@ -555,6 +597,25 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
         seed: sim.getSeed(),
         shieldsHeld: state.player.shields,
       });
+
+      /*
+       * The replay, serialised at exactly this instant.
+       *
+       * `sim.hash()` has to be read here rather than later: the next run resets
+       * the sim in place, and a hash read after that is the hash of a fresh
+       * state. Every submission would then be rejected — correctly, and
+       * inexplicably.
+       *
+       * A truncated recording (a run past 30 minutes) is deliberately NOT
+       * submitted. The bytes would parse and re-simulate to a different hash,
+       * so sending them would report a genuine 30-minute run as a forgery.
+       */
+      if (externalReplayRef !== undefined) {
+        externalReplayRef.current = engine.replay.overflowed
+          ? null
+          : serializeReplay(engine.replay, sim.hash());
+      }
+
       runEndRef.current?.(summary);
     }
 

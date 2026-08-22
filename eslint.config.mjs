@@ -298,6 +298,60 @@ export default defineConfig([
   },
 
   // ───────────────────────────────────────────────────────────────────────────
+  // LAYERING LAW — src/server/ is the trust boundary. P12.
+  //
+  // The server exists to re-run the sim and disbelieve the client. That is only
+  // possible because law (a) holds, and it stays possible only while this layer
+  // imports the SAME sim the browser ran — not a copy, not a port, not a
+  // reimplementation. So `@/game/sim` and `@/game/config` are expressly allowed
+  // and everything above them is not.
+  //
+  // The renderer is the sharp edge. `three` has no place in a Node process, and
+  // an import of it here would mean somebody had reached for render state to
+  // score a run — which is the exact failure the whole phase is built to prevent.
+  // ───────────────────────────────────────────────────────────────────────────
+  {
+    files: ["src/server/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "three",
+                "three/**",
+                "@react-three/*",
+                "@react-three/**",
+                "postprocessing",
+                "r3f-perf",
+                "react",
+                "react-dom",
+                "zustand",
+                "motion",
+                "@/game/render",
+                "@/game/render/**",
+                "@/game/input",
+                "@/game/input/**",
+                "@/game/audio",
+                "@/game/audio/**",
+                "@/ui",
+                "@/ui/**",
+                "@/app",
+                "@/app/**",
+              ],
+              message:
+                "LAYERING LAW (docs/ARCHITECTURE.md §3): src/server/ runs headless under Node. " +
+                "It may import @/game/sim, @/game/config and @/game/meta, and nothing above " +
+                "them. If this needs a renderer or a React store, it is not server code.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Every gameplay number lives in src/game/config/tuning.ts. CLAUDE.md QUALITY.
   // ───────────────────────────────────────────────────────────────────────────
   {

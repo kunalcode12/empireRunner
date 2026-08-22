@@ -332,6 +332,73 @@ export const TUNING = {
        *  band. OPEN. Must stay below stickThreshold. */
       stickReleaseThreshold: 0.25,
     },
+
+    /**
+     * The ceiling on how fast a human hand can actually change its mind.
+     *
+     * Used by the P12 submit path to reject a replay whose input log is denser
+     * than a person could produce — a bot pressing a new direction every other
+     * tick passes re-simulation perfectly, because it really did play that log;
+     * it just did not play it with hands.
+     *
+     * This lives here rather than in `src/server/config.ts` because it is a claim
+     * about GAMEPLAY, not about infrastructure. Changing it changes which runs
+     * count. CLAUDE.md's rule applies.
+     */
+    plausibility: {
+      /**
+       * changes/s — sustained rate of DIRECTION changes a human can hold.
+       *
+       * A direction change is any tick where lateral or roll differs from the
+       * previous tick. Competitive fighting-game players sustain roughly 8-10
+       * deliberate directional inputs a second at peak; 14 is comfortably past
+       * the human record and still an order of magnitude under what a script
+       * does, which is one every tick at 60. OPEN — raise it before rejecting a
+       * legitimate player, never lower it to catch one.
+       */
+      maxDirectionChangesPerSecond: 14,
+
+      /**
+       * changes/s — the burst allowance, over a one-second window.
+       *
+       * Separate from the sustained figure for the same reason a rate limiter
+       * has a burst: real play is spiky. A player answering a Shear Ring does
+       * genuinely mash for half a second. Only a sustained breach is suspicious.
+       */
+      maxBurstDirectionChangesPerSecond: 30,
+
+      /**
+       * x — how far the client's reported wall-clock duration may differ from
+       * `tickCount / tickRate` before the run is rejected.
+       *
+       * The sim is a fixed 60Hz accumulator, so a 60-second run is 3,600 ticks
+       * on every machine regardless of frame rate. A submission claiming 3,600
+       * ticks in 4 seconds was fast-forwarded; one claiming 3,600 ticks in an
+       * hour was paused or throttled for most of it, which is legal — hence the
+       * band is generous upward and tight downward, applied in `density.ts`.
+       *
+       * 0.5 means "no faster than half the wall-clock time it should have taken".
+       * Tab-throttling can only ever make a run take LONGER.
+       */
+      minWallClockRatio: 0.5,
+
+      /**
+       * x — the upper bound of the same band.
+       *
+       * A backgrounded tab, a paused run and a laptop lid all stretch wall clock
+       * without stretching ticks, so this is deliberately loose. It exists to
+       * catch a nonsense value, not to police attention.
+       */
+      maxWallClockRatio: 20,
+
+      /**
+       * ticks — the shortest run that may be submitted at all.
+       *
+       * Below this there is no score worth ranking and every submission is
+       * overhead. One second.
+       */
+      minTicks: 60,
+    },
   },
 
   // ───────────────────────────────────────────────────────────────────────────

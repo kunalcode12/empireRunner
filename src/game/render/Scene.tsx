@@ -84,6 +84,13 @@ export interface SceneProps {
    * `ThemeDirector`'s header describes for Static's unlock generally.
    */
   themeOverride?: string | null;
+  /**
+   * Where the finished replay is left for the submit path.
+   *
+   * Written immediately before the run-end callback fires, so the handler can
+   * read it synchronously and post it to `/api/run/submit`.
+   */
+  replayRef?: React.MutableRefObject<Uint8Array | null>;
 }
 
 export function Scene(props: SceneProps): React.ReactElement {
@@ -167,6 +174,7 @@ function PlayScene({
   unlockedThemes,
   themeSink = NULL_THEME_SINK,
   themeOverride = null,
+  replayRef,
 }: SceneProps): React.ReactElement {
   const tunnel = useRef<TunnelHandle | null>(null);
   const entities = useRef<EntityRendererHandle | null>(null);
@@ -305,6 +313,7 @@ function PlayScene({
     director: directorRef,
     fog,
     background,
+    replayRef,
   });
 
   return (

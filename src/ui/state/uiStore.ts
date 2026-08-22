@@ -59,11 +59,42 @@ export interface UiState {
   /** Bumped on every run start, so the canvas remounts with a fresh seed. */
   runId: number;
   seed: number;
+  /**
+   * The signed run token for the run in progress, or null.
+   *
+   * Null means the run cannot be submitted — the server was unreachable when it
+   * started, so the seed is a local one and no leaderboard place is possible.
+   * The run itself is unaffected; see `ui/state/runApi.ts` for why offline play
+   * degrades rather than blocks.
+   */
+  runToken: string | null;
+  /**
+   * Starting Shards for the run in progress, as the SERVER quoted them.
+   *
+   * Passed straight into `createSim({ shards })`. It is part of the simulated
+   * state and therefore part of the replay hash, so using the local save's
+   * number instead would make every run fail verification.
+   */
+  runShards: number;
+  /** ms epoch when the current run started. The submitted wall-clock figure. */
+  runStartedAt: number;
   settings: UiSettings;
 
   go(screen: ScreenName): void;
   back(): void;
-  startRun(seed?: number): void;
+  startRun(options?: { seed?: number; runToken?: string | null; shards?: number }): void;
+  /**
+   * Fetches a server-issued seed, then starts the run.
+   *
+   * What RUN and RETRY actually call. It is one round trip on a page that is
+   * already sitting still, and it is the difference between a leaderboard and a
+   * suggestion box — see `startRun`.
+   *
+   * Never rejects. `runApi.startRun` falls back to a local seed when the server
+   * cannot be reached, so a player with no connection still plays; they simply
+   * cannot submit.
+   */
+  beginRun(): Promise<void>;
   updateSettings(patch: Partial<UiSettings>): void;
 }
 
@@ -96,6 +127,8 @@ function applySideEffects(settings: UiSettings): void {
   setColorblindSafe(settings.colorblindSafe, root);
 }
 
+import { startRun as requestRunSeed } from "./runApi";
+
 export const useUiStore = create<UiState>()((set, get) => ({
   screen: Screen.Title,
   previous: Screen.Title,
@@ -103,6 +136,9 @@ export const useUiStore = create<UiState>()((set, get) => ({
   // Seeded from the clock on the first run rather than at module load, so two
   // tabs opened together do not play the identical track.
   seed: 1,
+  runToken: null,
+  runShards: 0,
+  runStartedAt: 0,
   settings: DEFAULT_SETTINGS,
 
   go(screen: ScreenName): void {
@@ -117,13 +153,36 @@ export const useUiStore = create<UiState>()((set, get) => ({
     set((state) => ({ screen: state.previous, previous: Screen.Title }));
   },
 
-  startRun(seed?: number): void {
+  /**
+   * Begins a run.
+   *
+   * **The seed is normally the SERVER's.** `app/play/page.tsx` fetches one from
+   * `/api/run/start` before calling this, because a client that picks its own
+   * seed can generate ten thousand layouts offline, find the one worth 400,000
+   * points, and submit a perfectly genuine replay of it — no forgery required.
+   *
+   * The local fallback survives only for the offline path and for tests. A run
+   * started that way has `runToken: null` and can never be submitted.
+   */
+  startRun(options?: { seed?: number; runToken?: string | null; shards?: number }): void {
     set((state) => ({
       screen: Screen.Run,
       previous: Screen.Title,
       runId: state.runId + 1,
-      seed: seed ?? Date.now() % 0x7fffffff,
+      seed: options?.seed ?? Date.now() % 0x7fffffff,
+      runToken: options?.runToken ?? null,
+      runShards: options?.shards ?? 0,
+      runStartedAt: Date.now(),
     }));
+  },
+
+  async beginRun(): Promise<void> {
+    const issued = await requestRunSeed();
+    get().startRun({
+      seed: issued.seed,
+      runToken: issued.runToken,
+      shards: issued.shards,
+    });
   },
 
   updateSettings(patch: Partial<UiSettings>): void {

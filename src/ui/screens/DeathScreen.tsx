@@ -59,7 +59,7 @@ export interface DeathScreenProps {
 }
 
 export function DeathScreen({ summary }: DeathScreenProps): React.ReactElement {
-  const startRun = useUiStore((state) => state.startRun);
+  const beginRun = useUiStore((state) => state.beginRun);
   const go = useUiStore((state) => state.go);
   const finishRun = useMetaStore((state) => state.finishRun);
   const settlement = useMetaStore((state) => state.lastSettlement);
@@ -246,7 +246,7 @@ export function DeathScreen({ summary }: DeathScreenProps): React.ReactElement {
 
       {/* ⑤ */}
       <div className="axis-death-actions" data-shown={beat >= BEATS.actions ? "1" : "0"}>
-        <Button variant="primary" onClick={() => startRun()} buttonRef={retryRef}>
+        <Button variant="primary" onClick={() => void beginRun()} buttonRef={retryRef}>
           RETRY
         </Button>
         <Button onClick={() => go(Screen.Shop)}>SHOP</Button>

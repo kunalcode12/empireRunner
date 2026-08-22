@@ -17,7 +17,9 @@
     "analyze": "next experimental-analyze",
     "build:themes": "node --import ./scripts/lib/ts-register.mjs scripts/build-themes.mjs",
     "check:payload": "node scripts/check-payload.mjs",
-    "prebuild": "npm run build:themes"
+    "prebuild": "npm run build:themes",
+    "test:load": "node --import ./scripts/lib/ts-register.mjs scripts/load-test.mjs",
+    "test:smoke": "node --import ./scripts/lib/ts-register.mjs scripts/smoke-api.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

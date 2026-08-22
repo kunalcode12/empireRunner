@@ -62,6 +62,13 @@ export interface GameCanvasProps {
   unlockedThemes?: readonly string[];
   /** Dev-only start theme, from `?theme=`. See `SceneProps.themeOverride`. */
   themeOverride?: string | null;
+  /**
+   * Where the finished replay is left for the submit path.
+   *
+   * Written immediately before the run-end callback fires, so the handler can
+   * read it synchronously and post it to `/api/run/submit`.
+   */
+  replayRef?: React.MutableRefObject<Uint8Array | null>;
 }
 
 const DEFAULT_SEED = 1;
@@ -77,6 +84,7 @@ export function GameCanvas({
   themeSink,
   unlockedThemes,
   themeOverride,
+  replayRef,
 }: GameCanvasProps): React.ReactElement {
   const quality = getQuality();
 
@@ -131,6 +139,7 @@ export function GameCanvas({
             themeSink={themeSink}
             unlockedThemes={unlockedThemes}
             themeOverride={themeOverride}
+            replayRef={replayRef}
           />
         </Canvas>
       </Suspense>

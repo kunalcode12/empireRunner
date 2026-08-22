@@ -199,6 +199,8 @@ export const ReplayRejection = {
   TickRateMismatch: "tick-rate-mismatch",
   TruncatedPayload: "truncated-payload",
   HashMismatch: "hash-mismatch",
+  /** The re-simulation ran past its CPU budget. P12. */
+  Timeout: "timeout",
 } as const;
 export type ReplayRejectionValue = (typeof ReplayRejection)[keyof typeof ReplayRejection];
 
@@ -251,6 +253,57 @@ export function parseReplay(bytes: Uint8Array): ParseResult {
   return { ok: true, rejection: ReplayRejection.None, header };
 }
 
+/**
+ * What a verifier needs to know that is NOT in the replay bytes.
+ *
+ * ## Starting Shards, and why they are not in the header
+ *
+ * P14 gave `createSim` a `RunOptions { shards }`, and `hashState` mixes
+ * `player.shards`. Shards buy Fracture saves, so a run that began with nine
+ * re-simulates to a different hash than one that began with zero. Until P12 this
+ * function always passed zero, which meant **every run by a player holding
+ * Shards verified as a forgery** — and the more they had invested, the more
+ * certainly they were called a cheat.
+ *
+ * The fix is deliberately NOT a new header field. A header field is a claim the
+ * client makes, and "I started with nine Shards" is nine free deaths for the
+ * asking. The server holds the balance and quotes it into the signed run token;
+ * this option is where that signed value enters. A client-side round trip passes
+ * nothing and gets zero, which is correct for a client that has not spent any.
+ */
+export interface VerifyOptions {
+  /** Shards the run began with. From the signed run token, never from the client. */
+  readonly shards?: number;
+  /**
+   * Asked periodically whether to give up. Returning true yields `Timeout`.
+   *
+   * A public submit endpoint accepts up to 108,000 ticks of work per request, so
+   * something has to be able to say "no further" — otherwise one pathological
+   * submission holds the loop for as long as it likes.
+   *
+   * **A callback rather than a deadline timestamp, and that is the layering law
+   * rather than taste.** `Date.now()` is banned under `src/game/sim/` (lint
+   * enforces it): the sim measures tick counts, never wall-clock time, because a
+   * simulation that can observe how long it took is a simulation whose result can
+   * depend on the machine. Inverting it puts the clock in the caller — where it
+   * belongs, since the CPU budget is a server policy — and leaves this file as
+   * wall-clock-free as the rest of the folder.
+   *
+   * Called every `DEADLINE_CHECK_TICKS`, because asking 108,000 times would cost
+   * more than the ticks do.
+   */
+  readonly shouldAbort?: () => boolean;
+}
+
+/**
+ * Ticks between deadline checks.
+ *
+ * 4,096 ticks is ~68 seconds of game time and a small fraction of any sane
+ * budget, so the deadline is honoured to within a rounding error while the check
+ * itself stays off the hot path.
+ */
+const DEADLINE_CHECK_TICKS = 4096;
+
 export interface VerifyResult {
   /** True only if the replay parsed AND the re-simulated hash matched the claim. */
   valid: boolean;
@@ -272,7 +325,7 @@ export interface VerifyResult {
  * The returned `score` is computed here, from the seed and the inputs. It is
  * never read from the payload — there is nowhere in the format to put one.
  */
-export function verify(bytes: Uint8Array): VerifyResult {
+export function verify(bytes: Uint8Array, options: VerifyOptions = {}): VerifyResult {
   const parsed = parseReplay(bytes);
   if (!parsed.ok || parsed.header === null) {
     return {
@@ -287,10 +340,23 @@ export function verify(bytes: Uint8Array): VerifyResult {
   }
 
   const header = parsed.header;
-  const sim = createSim(header.seed);
+  const sim = createSim(header.seed, { shards: options.shards ?? 0 });
   const intent = createIntent();
+  const shouldAbort = options.shouldAbort;
 
   for (let i = 0; i < header.tickCount; i += 1) {
+    // Amortised, not per-tick. See `DEADLINE_CHECK_TICKS`.
+    if (shouldAbort !== undefined && i % DEADLINE_CHECK_TICKS === 0 && shouldAbort()) {
+      return {
+        valid: false,
+        rejection: ReplayRejection.Timeout,
+        score: 0,
+        distance: 0,
+        hash: 0,
+        claimedHash: header.finalHash,
+        ticksSimulated: i,
+      };
+    }
     unpackIntent(bytes[HEADER_BYTES + i] ?? 0, intent);
     sim.tick(intent);
   }
