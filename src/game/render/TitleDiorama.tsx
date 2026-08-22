@@ -30,6 +30,7 @@
 import { useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { TUNING } from "@/game/config/tuning";
+import { DEFAULT_THEME } from "@/game/config/themes";
 import { acquireAudioDirector, type AudioDirector } from "@/game/audio";
 import { RunnerRig, type RunnerRigHandle } from "./animation/RunnerRig";
 import { AnimationState } from "./interpolate";
@@ -74,6 +75,8 @@ export function TitleDiorama(): React.ReactElement {
 
   const distance = useRef(0);
   const angle = useRef(0);
+  /** s — render time, for the tunnel surface's animated term. */
+  const elapsed = useRef(0);
 
   /**
    * The menu has music.
@@ -106,11 +109,12 @@ export function TitleDiorama(): React.ReactElement {
     // the same ceiling the sim's accumulator uses, so the diorama does not spin
     // like a top when the player comes back.
     const step = Math.min(delta, TUNING.sim.maxAccumulator);
+    elapsed.current += step;
 
     distance.current += IDLE_SPEED * step;
     angle.current += ORBIT_RATE * step;
 
-    tunnel.current?.update(distance.current, 0);
+    tunnel.current?.update(distance.current, 0, elapsed.current);
 
     const rig = player.current;
     if (rig !== null) {
@@ -143,9 +147,9 @@ export function TitleDiorama(): React.ReactElement {
 
   return (
     <>
-      <Tunnel handleRef={tunnel} />
+      <Tunnel handleRef={tunnel} theme={DEFAULT_THEME} />
       <RunnerRig handleRef={player} />
-      <LightingRig handleRef={lighting} />
+      <LightingRig handleRef={lighting} theme={DEFAULT_THEME} />
     </>
   );
 }

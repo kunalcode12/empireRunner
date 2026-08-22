@@ -43,7 +43,10 @@ axis/
 │   │   ├── config/
 │   │   │   ├── tuning.ts       THE ONLY HOME FOR GAMEPLAY NUMBERS
 │   │   │   ├── entities.ts     obstacle / pickup / hazard tables
-│   │   │   └── themes.ts       theme registry: palettes, fog, props, stems
+│   │   │   └── themes/         theme registry — one file per theme, P10
+│   │   │       ├── types.ts    the Theme contract. No values, only the shape.
+│   │   │       ├── index.ts    THEMES, ordinal cycling, unlock resolution
+│   │   │       └── kiln.ts · undertow.ts · bazaar.ts · static.ts
 │   │   │
 │   │   ├── render/             ALL react-three-fiber. Reads sim state, never writes it.
 │   │   │   ├── GameCanvas.tsx  the single client component
@@ -53,6 +56,14 @@ axis/
 │   │   │   ├── Debris.tsx      Rapier, cosmetic only
 │   │   │   ├── materials/      screen-print, key-line, halftone
 │   │   │   ├── postfx/         bloom (Overdrive only), vignette, transient CA
+│   │   │   ├── theme/          P10 — the theme runtime
+│   │   │   │   ├── ThemeDirector.ts  owns which place the run is in
+│   │   │   │   ├── crossfade.ts      the 4s fade, as pure arithmetic
+│   │   │   │   ├── loader.ts         GLB streaming with byte-accurate progress
+│   │   │   │   └── tints.ts          live particle / entity colours
+│   │   │   ├── props/          P10 — decorative instanced geometry, LOD + culling
+│   │   │   ├── hud-sink.ts     output port -> src/ui/hud/
+│   │   │   ├── theme-sink.ts   output port -> src/ui/ThemeStage.tsx
 │   │   │   └── interpolate.ts  blends the two most recent sim snapshots
 │   │   │
 │   │   ├── audio/              raw Web Audio. No library. Framework-free, like input/.
@@ -240,6 +251,8 @@ Hard rules, all enforced by ESLint import boundaries in P01:
 | `meta/` runs no economy or mission logic during a run | Economy and missions settle at run end, off the hot path. **One exception, added at P13:** the run-summary recorder in `meta/runSummary.ts` counts events inside the frame loop. It allocates nothing, decides nothing, and cannot reach a balance — there is no economy import in that file. It exists because `bitsCollected`, `nearMisses` and `peakFlow` are not fields in `SimState`, and the event ring holds only 256 entries, so by run end the data is gone rather than merely awkward to reach. |
 | `ui/` and `render/` never name each other. **`app/` is the seam.** | Added at P14. `ui/` may not import `render/` (lint), and `render/` may not import `ui/` (the arrow points down). So the run HUD is driven through an **output port**: `render/hud-sink.ts` declares a `HudSink` interface of setters, `src/ui/hud/Hud.tsx` returns a structurally identical object, and `src/app/play/page.tsx` — which sits above both — performs the one assignment where TypeScript checks the halves agree. No shared enum, so nothing can drift; duplicated sim constants have already caused two real bugs here (`ThemeChange` at P11, pickup kinds at P13). Every method is a setter returning `void`: a read would be a layout flush inside `useFrame`. |
 | The `AudioContext` is a **session** resource, not a per-mount one | Added at P14, after a real bug. `acquireAudioDirector()` hands out reference-counted handles onto one shared director, and teardown is deferred a tick so a React handover — which unmounts the outgoing tree *before* mounting the incoming one — does not pass through zero and destroy the graph. Building one per component meant the music died on every RUN press, because the new context's gesture listeners were armed after the click that would have unlocked them, and Chrome caps a page at roughly six contexts. The same reasoning applies to the WebGL context, which is now mounted once for the session. |
+| The theme is resolved in `render/`, never in `sim/` | Added at P10. `SimEvent.ThemeChange` carries the **ordinal the run reached** and nothing else. Which theme that ordinal *means* — and whether this player has unlocked Static — is a presentation question, answered by `render/theme/ThemeDirector` against the registry. That is what keeps the unlock out of the deterministic sim: two players crossing 5,120m on the same seed run identically, and only one of them sees Static. It is also a correctness rule rather than a tidiness one. The audio layer used to key its stem swap off the raw event, so a player *without* Static heard its detuned FM lead over Kiln's foundry walls; `AudioDirector.setTheme` is now driven by the visual director, and `handleEvent` only tracks the ordinal so an unmute mid-run starts on the right stems. |
+| A second output port, on the same seam | Added at P10. `render/theme-sink.ts` declares `ThemeSink` and `src/ui/ThemeStage.tsx` implements it, assigned in `app/play/page.tsx` exactly as `HudSink` is. Two ports rather than more methods on one, because the clocks are completely different: `HudSink` is called at `ui.hudPushHz` during a run and must never allocate; `ThemeSink` fires a handful of times a session and is allowed to do real work. The port carries **slugs**, not a token bundle — `src/ui/theme.ts` already imports `config/themes` and is entitled to, since only `render/` is off-limits to `ui/`, so a parallel `ThemeTokens` type would have been a second name for `ThemeUiRoles` and one more thing to drift. |
 | `audio/` and `meta/` may import sim **constants only** | `audio/` at P11, `meta/` at P13. The ring buffer is the sanctioned one-way channel from sim to presentation, and mapping an event to a sound — or to a mission counter — requires knowing the event and pickup kinds. The alternative is duplicate enums whose numeric values are part of the replay format, and that duplication is precisely what caused the `ThemeChange` bug found at P11. Read-only, downward, and neither layer can write to the sim. |
 
 ### 3.1 Where state lives
@@ -278,6 +291,10 @@ no dependency is added, removed or upgraded without approval.
 | `@playwright/test` | 1.62.1 | ✅ P01 | E2E boot test and the draw-call / bundle budget gates. |
 | `r3f-perf` | 7.2.3 | ✅ P01 | Dev-only perf HUD. Must be absent from the production bundle. |
 | `leva` | 0.10.1 | ✅ P01 | Dev-only tuning panel bound to `tuning.ts`, clamped to the ranges in [TUNING.md](./TUNING.md). Tree-shaken from prod. |
+| `@gltf-transform/core` | ^4.4.2 | ✅ P10 | **Build time only.** Writing and reading the theme GLB bundles in `scripts/build-themes.mjs`. Never imported by `src/`. |
+| `@gltf-transform/extensions` | ^4.4.2 | ✅ P10 | **Build time only.** `EXT_meshopt_compression` and `KHR_mesh_quantization` registration. Registering only the former silently dropped the latter and the writer warned about it. |
+| `@gltf-transform/functions` | ^4.4.2 | ✅ P10 | **Build time only.** `prune`, `dedup` and the meshopt transform. |
+| `meshoptimizer` | ^1.2.0 | ✅ P10 | **Build time only.** The encoder. The matching *decoder* ships inside `three` (`examples/jsm/libs/meshopt_decoder`), which is most of why meshopt was chosen over Draco — Draco needs a `.wasm` copied into `public/` and fetched before the first prop can draw. |
 | `maath` | — | ❌ P05 | Easing and interpolation helpers for 3D. Not yet installed. |
 | `howler` | — | ❌ **never** | **Not installed, and no longer needed.** P11 shipped the whole audio layer on raw Web Audio — buses, ducking, a voice pool, adaptive stems and offline-rendered procedural sounds — in ~1,400 lines with no dependency. Howler's value is cross-browser `<audio>` fallback and sprite management, and this project bans `<audio>` outright (no sample-accurate clock; music stems drift). **`<audio>` elements remain banned** and `tests/e2e/audio.spec.ts` asserts the page contains none. |
 

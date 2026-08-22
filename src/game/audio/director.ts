@@ -111,6 +111,20 @@ export interface AudioDirector {
 
   /** Routes one drained sim event. Cheap, and safe before warm-up. */
   handleEvent(event: AudioEvent): void;
+  /**
+   * Crossfades to a theme's stem set, aligned to a loop boundary.
+   *
+   * **Changed at P10.** This used to happen inside `handleEvent`, on
+   * `SimEvent.ThemeChange`. It cannot: that event carries the ordinal the RUN
+   * reached, and the theme a player actually SEES is resolved against the unlock
+   * table by `render/theme/ThemeDirector` — so a player without Static crossed
+   * 5,120m and heard Static's detuned FM lead over Kiln's foundry walls.
+   *
+   * The event is still tracked here, so a player who unmutes mid-run gets the
+   * right stems; it just no longer triggers the swap. The visual director does,
+   * from inside the crossfade's musical window.
+   */
+  setTheme(themeIndex: number): void;
   /** Per-frame state the music adapts to. Cheap; safe to call every frame. */
   setTelemetry(worldSpeed: number, flow: number): void;
   dispose(): void;
@@ -315,10 +329,9 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
       // player who unmutes at 3,000m gets Bazaar rather than Kiln.
       switch (event.type) {
         case SimEvent.ThemeChange:
+          // Tracked, NOT played — see `setTheme`. An unmute after this point
+          // still starts on the right theme, because warm-up reads this value.
           themeIndex = Math.max(0, Math.trunc(event.payload0));
-          if (music !== null) {
-            void music.play(themeIndex).then(publish);
-          }
           break;
         case SimEvent.OverdriveStart:
           overdriveActive = true;
@@ -337,6 +350,16 @@ export function createAudioDirector(options: AudioDirectorOptions = {}): AudioDi
       }
 
       sfx?.handle(event.type, event.payload0, engine.now());
+    },
+
+    setTheme(index: number): void {
+      if (disposed || !Number.isFinite(index)) {
+        return;
+      }
+      themeIndex = Math.max(0, Math.trunc(index));
+      if (music !== null) {
+        void music.play(themeIndex).then(publish);
+      }
     },
 
     setTelemetry(worldSpeed: number, flow: number): void {
@@ -450,6 +473,9 @@ export function acquireAudioDirector(options: AudioDirectorOptions = {}): AudioD
     },
     handleEvent(event: AudioEvent): void {
       shared.handleEvent(event);
+    },
+    setTheme(index: number): void {
+      shared.setTheme(index);
     },
     setTelemetry(worldSpeed: number, flow: number): void {
       shared.setTelemetry(worldSpeed, flow);

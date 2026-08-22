@@ -1446,7 +1446,116 @@ export const TUNING = {
   },
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 17. Enforced budgets — docs/TUNING.md §14
+  // 17. Themes, props and transitions — docs/TUNING.md §19, P10
+  //
+  // Presentation only. The theme a run is in cannot change where the player ends
+  // up — the sim emits a milestone and never reads one back.
+  //
+  // Per-theme values (palettes, fog distances, prop sets, light rigs) live in
+  // `config/themes/`, not here: they are CONTENT, on the same footing as chunk
+  // layouts and sound recipes. What lives here governs the SYSTEM.
+  // ───────────────────────────────────────────────────────────────────────────
+  theme: {
+    /** s — how long a theme crossfade takes.
+     *
+     *  The transition tunnel is 120m of guaranteed-empty track (GAME_BIBLE §10),
+     *  which at the ~25 u/s mid-run speed is about 4.8s. The crossfade has to
+     *  finish inside that window or it bleeds into geometry the player has to
+     *  answer, so 4.0s leaves ~0.8s of margin at the design speed. Faster than
+     *  ~2s and it reads as a cut; slower than the tunnel and it is a cut anyway,
+     *  because the transition ends before the fade does. */
+    crossfadeSeconds: 4.0,
+
+    /** x — how far into the crossfade the music is allowed to swap.
+     *
+     *  Music moves on a BAR boundary, not on the visual clock, so it cannot be
+     *  scheduled to land exactly with the palette. This is the window it may
+     *  land in: after 20% and before 80% of the fade. Outside that it reads as
+     *  either a premature cut or a late correction. */
+    musicSwapWindowStart: 0.2,
+    musicSwapWindowEnd: 0.8,
+
+    /** s — how long the theme title card holds on screen at a transition. */
+    titleCardSeconds: 2.2,
+
+    /** x — fraction of the crossfade the OUTGOING prop set takes to clear.
+     *
+     *  Under 1 so props are gone before the incoming set is at full strength —
+     *  two furnished themes on screen at once reads as clutter rather than as a
+     *  transition. */
+    propFadeOut: 0.55,
+
+    /** count — how many themes ahead the preloader warms. One, always.
+     *
+     *  The brief's rule. Two would double resident memory for a theme the player
+     *  may never reach; zero means the transition either stalls or cuts. */
+    preloadAhead: 1,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 18. Props — decorative geometry outside the play space
+  //
+  // A prop that reads as an obstacle costs the player a run, so the separation
+  // is structural rather than stylistic: props live beyond the prism wall, on
+  // their own instanced layer, and are never placed in one of the 12 play cells.
+  // ───────────────────────────────────────────────────────────────────────────
+  props: {
+    /** u — how far past the player's widest reach a prop must start.
+     *
+     *  ## The number that makes "a prop can never be hit" true
+     *
+     *  The first design put props OUTSIDE the prism wall, which was safe and
+     *  invisible: the walls are opaque flat colour, so the entire prop layer
+     *  rendered behind them and cost 10 draw calls to draw nothing. Caught by
+     *  looking at a frame.
+     *
+     *  Props now sit INSIDE the prism, in the margin band between the outermost
+     *  lane and the wall. The player's widest possible extent on any face is
+     *  `laneWidth * (laneCount - 1) / 2 + playerWidth / 2` = 2.2 + 0.35 = 2.55u,
+     *  and that is true on every face and after every roll — the 12 play cells
+     *  are symmetric. A prop whose nearest edge is beyond 2.55u is unreachable
+     *  by construction, not by placement luck.
+     *
+     *  0.45 puts the boundary at 3.0u, which is 0.45u of daylight the player can
+     *  see between themselves and the scenery at the widest lane. */
+    laneClearance: 0.45,
+    /** u — how far a prop may extend inward from the face it is fixed to.
+     *
+     *  Bounded so a tall hanging prop cannot reach across the tunnel and read as
+     *  something spanning the play space. */
+    depth: 2.4,
+
+    /** count — props live per side of the tunnel at HIGH quality. */
+    maxPerSideHigh: 48,
+    /** count — at MEDIUM. */
+    maxPerSideMedium: 32,
+    /** count — at LOW. Mobile draws fewer, not smaller. */
+    maxPerSideLow: 14,
+
+    /** u — spacing between prop slots along z. Jittered per slot from the
+     *  seeded cosmetic RNG stream, so a theme is never a regular fence. */
+    slotSpacing: 7.0,
+    /** u — maximum jitter applied to a slot's z. Must stay under half the
+     *  spacing or slots can swap order and pop during recycling. */
+    slotJitter: 2.6,
+
+    /** u — beyond this distance a prop drops to its low LOD. */
+    lodDistance: 46.0,
+    /** u — beyond this it is not drawn at all. Must exceed the longest fog
+     *  distance (Bazaar 70u) or props visibly pop in inside the sightline. */
+    cullDistance: 78.0,
+
+    /** x — scale of the low-LOD form relative to the high one. Low LOD is a
+     *  simplified silhouette at the same footprint, never a shrunken copy. */
+    lodScale: 1.0,
+
+    /** count — triangles budgeted for the whole prop layer at HIGH. Enforced in
+     *  `tests/e2e/themes.spec.ts` against `renderer.info.render.triangles`. */
+    triangleBudgetHigh: 60_000,
+  },
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 19. Enforced budgets — docs/TUNING.md §14
   //
   // These are tests, not aspirations. They fail CI.
   // ───────────────────────────────────────────────────────────────────────────
@@ -1511,6 +1620,25 @@ export const TUNING = {
     /** x — WCAG AA contrast floor for every text role against its real ground.
      *  Recomputed from the theme hex values in `tests/ui/contrast.test.ts`. */
     uiContrastMin: 4.5,
+
+    /** bytes — total download for the FIRST PLAYABLE FRAME.
+     *
+     *  The brief's 4MB. Measured from the real `next build` output plus the
+     *  first theme's asset bundle, by `scripts/check-payload.mjs`. Themes beyond
+     *  the first are excluded because they stream after the run has started —
+     *  counting them would measure something the player never waits for. */
+    initialPayloadBytes: 4 * 1024 * 1024,
+
+    /** bytes — ceiling on any single theme's compressed geometry bundle.
+     *  Four of these plus the JS has to fit the budget above with room to spare. */
+    themeBundleBytes: 512 * 1024,
+
+    /** ms — the longest frame permitted during a theme crossfade.
+     *
+     *  A hitch here is the one the player is most likely to notice, because the
+     *  transition tunnel is the only place in the run with nothing to do. 32ms
+     *  is two dropped frames at 60Hz. */
+    transitionFrameMs: 32,
   },
 } as const;
 

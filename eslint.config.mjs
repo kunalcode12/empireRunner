@@ -231,11 +231,33 @@ export default defineConfig([
         {
           patterns: [
             {
-              // Anything that is not a relative sibling import.
-              regex: "^(?!\\./)",
+              // Anything that is not a relative import INSIDE config/.
+              //
+              // Relaxed at P10 from `^(?!\./)` to also permit `../`. The law is
+              // that config imports nothing from *outside itself* — it is one
+              // leaf layer — and the old regex accidentally also forbade a
+              // config subdirectory from reading a config sibling. That blocked
+              // `config/themes/kiln.ts` from importing `../tuning`, whose only
+              // alternative was to duplicate the fog distances into the theme
+              // files. Duplicated constants are what caused the `ThemeChange`
+              // bug at P11 and the pickup-kind bug at P13; this rule should not
+              // be the thing that forces a third.
+              //
+              // `../` cannot escape config/ in practice — a file in
+              // `config/themes/` reaching `../../render` is caught by the
+              // explicit group below, and there is nothing else at that depth.
+              regex: "^(?!\\.\\.?/)",
               message:
                 "LAYERING LAW (docs/ARCHITECTURE.md §3): src/game/config/ is leaf data and " +
-                "imports nothing. Only relative sibling imports (./entities, ./themes) are allowed.",
+                "imports nothing from outside itself. Only relative imports within config/ " +
+                "(./entities, ../tuning) are allowed.",
+            },
+            {
+              // Belt and braces: a relative path that climbs OUT of config/.
+              regex: "^(\\.\\./)+(sim|render|ui|app|input|audio|meta)(/|$)",
+              message:
+                "LAYERING LAW (docs/ARCHITECTURE.md §3): src/game/config/ is leaf data. It may " +
+                "not reach into any other layer, relatively or otherwise.",
             },
           ],
         },

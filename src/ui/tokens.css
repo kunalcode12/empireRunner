@@ -117,6 +117,10 @@
   --axis-z-hud: 10;
   --axis-z-halftone: 20;
   --axis-z-screen: 30;
+  /* The theme card sits ABOVE screens and BELOW the shutter: it has to cover the
+     palette cut during a run (so, above the HUD and the halftone), and a screen
+     transition has to be able to wipe over it. */
+  --axis-z-theme-card: 35;
   --axis-z-shutter: 40;
 
   /* ── Safe areas, with a floor so desktop still has margin. ─────────────── */

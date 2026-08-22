@@ -41,13 +41,11 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
-import { GREYBOX } from "./palette";
+import type { Theme } from "@/game/config/themes";
 import { getQuality } from "./perf/quality";
 
 const HALF_SIZE = TUNING.render.shadowFrustumHalfSize;
 const FRUSTUM_DEPTH = TUNING.render.shadowFrustumDepth;
-const HEMI_INTENSITY = TUNING.render.hemisphereIntensity;
-const KEY_INTENSITY = TUNING.render.directionalIntensity;
 const PRISM_SIZE = TUNING.geometry.prismInnerSize;
 
 const HALF = 0.5;
@@ -61,23 +59,39 @@ const SHADOW_BIAS = -0.0008;
 export interface LightingRigHandle {
   /** Moves the key light's shadow frustum to track the player. */
   update(x: number, y: number, face: number): void;
+  /**
+   * Blends the rig between two themes' light parameters.
+   *
+   * Colour and intensity both lerp. The AZIMUTH lerps too, which is what makes a
+   * transition feel like the sun moving rather than like a switch being thrown —
+   * Kiln rakes from one side, Bazaar from the other, and the shadow sweeps across
+   * the floor over the four seconds between them.
+   */
+  blend(from: Theme, to: Theme, t: number): void;
 }
 
 export interface LightingRigProps {
   handleRef: React.MutableRefObject<LightingRigHandle | null>;
+  theme: Theme;
 }
 
-export function LightingRig({ handleRef }: LightingRigProps): React.ReactElement {
+export function LightingRig({ handleRef, theme }: LightingRigProps): React.ReactElement {
   const keyRef = useRef<THREE.DirectionalLight>(null);
   const targetRef = useRef<THREE.Object3D>(null);
 
   const quality = getQuality();
   const shadowsOn = quality.shadows && quality.shadowMapSize > 0;
 
+  const hemiRef = useRef<THREE.HemisphereLight>(null);
+  /** Live azimuth, written by  and read by . */
+  const azimuthRef = useRef(theme.lighting.keyAzimuth);
+
   const scratch = useMemo(
     () => ({
       position: new THREE.Vector3(),
       target: new THREE.Vector3(),
+      colorA: new THREE.Color(),
+      colorB: new THREE.Color(),
       quaternion: new THREE.Quaternion(),
       axis: new THREE.Vector3(0, 0, 1),
     }),
@@ -126,34 +140,83 @@ export function LightingRig({ handleRef }: LightingRigProps): React.ReactElement
         scratch.target.applyQuaternion(quat);
         target.position.copy(scratch.target);
 
-        scratch.position.set(x + KEY_OFFSET.x, -PRISM_SIZE * HALF + y + KEY_OFFSET.y, KEY_OFFSET.z);
+        // The azimuth rotates the key's offset around the player, so a theme's
+        // light comes from its own direction rather than every theme being lit
+        // from the same corner.
+        const azimuth = azimuthRef.current;
+        const cos = Math.cos(azimuth);
+        const sin = Math.sin(azimuth);
+        const offsetX = KEY_OFFSET.x * cos - KEY_OFFSET.z * sin;
+        const offsetZ = KEY_OFFSET.x * sin + KEY_OFFSET.z * cos;
+
+        scratch.position.set(x + offsetX, -PRISM_SIZE * HALF + y + KEY_OFFSET.y, offsetZ);
         scratch.position.applyQuaternion(quat);
         light.position.copy(scratch.position);
 
         target.updateMatrixWorld();
       },
+
+      blend(from, to, t): void {
+        const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+        const light = keyRef.current;
+        const hemi = hemiRef.current;
+
+        azimuthRef.current =
+          from.lighting.keyAzimuth + (to.lighting.keyAzimuth - from.lighting.keyAzimuth) * clamped;
+
+        if (light !== null) {
+          light.color
+            .copy(scratch.colorA.set(from.lighting.keyColor))
+            .lerp(scratch.colorB.set(to.lighting.keyColor), clamped);
+          light.intensity =
+            from.lighting.keyIntensity +
+            (to.lighting.keyIntensity - from.lighting.keyIntensity) * clamped;
+        }
+
+        if (hemi !== null) {
+          hemi.color
+            .copy(scratch.colorA.set(from.lighting.skyColor))
+            .lerp(scratch.colorB.set(to.lighting.skyColor), clamped);
+          hemi.groundColor
+            .copy(scratch.colorA.set(from.lighting.groundColor))
+            .lerp(scratch.colorB.set(to.lighting.groundColor), clamped);
+          hemi.intensity =
+            from.lighting.hemiIntensity +
+            (to.lighting.hemiIntensity - from.lighting.hemiIntensity) * clamped;
+        }
+      },
     };
 
     handleRef.current = handle;
+    // Prime the rig at the mounted theme so the first frame is already lit for
+    // the right place rather than for whatever the JSX defaults were.
+    handle.blend(theme, theme, 1);
     return () => {
       handleRef.current = null;
     };
-  }, [handleRef, scratch]);
+  }, [handleRef, scratch, theme]);
 
   return (
     <group name="lighting">
-      {/* Fill. Sky is bone, ground is gunmetal, so faces pointing away from the
-          key light take a palette colour rather than going black. */}
+      {/* Fill. Both colours come from the theme, so faces pointing away from the
+          key light take one of that place's palette colours rather than going
+          black — which is both the §11.3 floor and the reason the prism reads as
+          four sides at all. */}
       <hemisphereLight
-        args={[new THREE.Color(GREYBOX.bone), new THREE.Color(GREYBOX.gunmetal), HEMI_INTENSITY]}
+        ref={hemiRef}
+        args={[
+          new THREE.Color(theme.lighting.skyColor),
+          new THREE.Color(theme.lighting.groundColor),
+          theme.lighting.hemiIntensity,
+        ]}
       />
 
       <object3D ref={targetRef} name="key-light-target" />
 
       <directionalLight
         ref={keyRef}
-        intensity={KEY_INTENSITY}
-        color={new THREE.Color(GREYBOX.bone)}
+        intensity={theme.lighting.keyIntensity}
+        color={new THREE.Color(theme.lighting.keyColor)}
         castShadow={shadowsOn}
         shadow-mapSize-width={quality.shadowMapSize || 1}
         shadow-mapSize-height={quality.shadowMapSize || 1}

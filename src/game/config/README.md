@@ -9,7 +9,23 @@ The bottom of the dependency graph. **This folder imports nothing** (enforced by
   [docs/TUNING.md](../../../docs/TUNING.md), grouped by system, each with a unit comment and
   a LOCKED / DERIVED / OPEN status tag.
 - `entities.ts` — obstacle, pickup and hazard tables (P07)
-- `themes.ts` — theme registry: palettes, fog, prop sets, music stems (P10)
+- `themes/` — the theme registry (P10). One file per theme plus `types.ts` (the contract,
+  no values) and `index.ts` (ordinal cycling and unlock resolution).
+
+## Adding a fifth theme
+
+It is a **data change only**. Write `themes/<slug>.ts`, add it to the array in
+`themes/index.ts`, run `npm run build:themes`. Nothing else in the codebase should need
+touching — no switch gains an arm, no list of four grows to five.
+
+That claim is not a hope; `tests/theme/extensibility.test.ts` builds a synthetic fifth theme
+out of data alone and pushes it through the crossfade, the tint layer, the prop-geometry
+builders and the loader's naming contract. **If that test fails, the abstraction is wrong and
+the fix is in the consumer, not in the test.**
+
+The registry's own invariants — palette size, contrast, fog floors, no prop wearing the
+obstacle accent — are asserted in `tests/theme/registry.test.ts` by iterating `THEMES` rather
+than by restating them, which is what makes them apply to a theme nobody has written yet.
 
 ## Does NOT belong here
 

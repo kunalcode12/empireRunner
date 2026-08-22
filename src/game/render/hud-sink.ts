@@ -64,7 +64,7 @@ export interface HudSink {
    */
   setFracture(state: { fraction: number; verb: number; shardCost: number } | null): void;
   /** The run crossed a theme milestone. Payload is the theme ordinal. */
-  setTheme(ordinal: number): void;
+
   /** Paused or resumed. The HUD dims rather than unmounting. */
   setPaused(paused: boolean): void;
   /** Clears every counter back to zero. Called at run start. */
@@ -90,7 +90,7 @@ export const NULL_HUD_SINK: HudSink = Object.freeze({
   nearMiss(): void {},
   setOverdrive(): void {},
   setFracture(): void {},
-  setTheme(): void {},
+
   setPaused(): void {},
   reset(): void {},
 });

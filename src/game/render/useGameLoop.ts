@@ -86,7 +86,10 @@ import {
   type RunRecorder,
   type RunSummary,
 } from "@/game/meta";
+import * as THREE from "three";
 import { NULL_HUD_SINK, type HudSink } from "./hud-sink";
+import type { PropFieldHandle } from "./props/PropField";
+import type { ThemeDirector } from "./theme/ThemeDirector";
 import { getScore, scoreMultiplier, shardCostFor } from "@/game/sim/scoring";
 
 /** Everything the loop drives. All refs; all mutated, never re-rendered. */
@@ -98,6 +101,10 @@ export interface GameLoopRefs {
   lighting: React.MutableRefObject<LightingRigHandle | null>;
   particles: React.MutableRefObject<ParticleSystemHandle | null>;
   speedLines: React.MutableRefObject<SpeedLinesHandle | null>;
+  /** The prop field for the theme being left. Drawn only during a transition. */
+  propsOut: React.MutableRefObject<PropFieldHandle | null>;
+  /** The prop field for the theme being entered, and the resting one. */
+  propsIn: React.MutableRefObject<PropFieldHandle | null>;
 }
 
 export interface GameLoopOptions {
@@ -131,6 +138,18 @@ export interface GameLoopOptions {
    * unreachable unless they picked a Shard up mid-run. See `sim.RunOptions`.
    */
   startingShards?: number;
+  /**
+   * The theme director, as a ref.
+   *
+   * A ref rather than a value because it is created in an effect — the loop
+   * reads `.current` each frame and simply does nothing on the handful of frames
+   * before it exists, exactly as it already does for the rigs.
+   */
+  director?: React.MutableRefObject<ThemeDirector | null>;
+  /** The scene fog, mutated by the director. */
+  fog?: THREE.Fog;
+  /** The scene background, kept equal to the fog colour. */
+  background?: THREE.Color;
 }
 
 /** The mutable machine behind the loop. Lives in a ref, never in React state. */
@@ -174,6 +193,21 @@ interface Engine {
   overdriveShown: boolean;
   /** Last paused state pushed, so the dim is not re-applied every frame. */
   pausedShown: boolean;
+  /**
+   * Reused target object for the theme director.
+   *
+   * The director takes its targets as an argument rather than holding refs to
+   * them, which keeps it testable — but the loop still allocates nothing, so
+   * this is one object mutated in place rather than a fresh literal per frame.
+   */
+  themeTargets: {
+    tunnel: TunnelHandle | null;
+    lighting: LightingRigHandle | null;
+    fog: THREE.Fog | null;
+    background: THREE.Color | null;
+  };
+  /** s — render time since the engine was built. Drives the surface effects. */
+  renderTime: number;
 }
 
 const MS_PER_SECOND = 1000;
@@ -201,7 +235,17 @@ export type GameLoopApi = React.MutableRefObject<Engine | null>;
  * catch, and it would be genuinely wrong here since it is null on first paint.
  */
 export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameLoopApi {
-  const { seed, onEvent, paused = false, hud, onRunEnd, startingShards = 0 } = options;
+  const {
+    seed,
+    onEvent,
+    paused = false,
+    hud,
+    onRunEnd,
+    startingShards = 0,
+    director,
+    fog,
+    background,
+  } = options;
 
   const engineRef = useRef<Engine | null>(null);
 
@@ -278,7 +322,33 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       lastHudPush: 0,
       overdriveShown: false,
       pausedShown: false,
+      themeTargets: {
+        tunnel: null,
+        lighting: null,
+        fog: fog ?? null,
+        background: background ?? null,
+      },
+      renderTime: 0,
     };
+
+    /*
+     * The music follows the DIRECTOR, not the sim event.
+     *
+     * `SimEvent.ThemeChange` carries the ordinal the run reached. The director
+     * resolves that against the unlock table, so a player without Static cycles
+     * back to Kiln — and if the music keyed off the raw event it would play
+     * Static's detuned FM lead over Kiln's foundry. Routing it here also puts
+     * the swap inside the crossfade's musical window rather than at its start,
+     * so the stems and the walls arrive together.
+     *
+     * `music.play` still owns the alignment: it starts the new set a whole
+     * number of loops after the session origin, which is a bar boundary by
+     * construction (4 beats/bar, 4 bars/loop).
+     */
+    const attachedDirector = director?.current ?? null;
+    attachedDirector?.setMusicListener((stemSet) => {
+      engine.audio.setTheme(stemSet);
+    });
 
     // Subscribed through a ref so changing the listener does not tear the engine
     // down and restart the run.
@@ -316,7 +386,12 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
           engine.overdriveShown = false;
           break;
         case SimEvent.ThemeChange:
-          sink.setTheme(event.payload0);
+          // The sim says WHEN; the director decides what that ordinal means,
+          // whether the player has unlocked it, and therefore what the DOM and
+          // the music should follow. The HUD is NOT told directly: this event
+          // carries the ordinal the sim reached, and for a player without Static
+          // that is a theme they never see.
+          director?.current?.requestTheme(event.payload0);
           break;
         case SimEvent.FractureTick:
           // payload1 = fraction remaining, payload2 = the one clearing verb.
@@ -352,7 +427,11 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
       engine.audio.dispose();
       engineRef.current = null;
     };
-  }, [seed]);
+    // `fog`, `background` and `director` are all stable for the life of the
+    // scene — two `useMemo` objects and a ref — so listing them satisfies the
+    // exhaustive-deps rule without ever actually rebuilding the engine. Leaving
+    // them out would be the kind of silent staleness this rule exists to catch.
+  }, [seed, fog, background, director]);
 
   /**
    * A backgrounded tab must DROP its accumulated time, not simulate it.
@@ -487,6 +566,19 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     //     opposite of the weight the freeze is trying to add.
     engine.audio.setTelemetry(view.worldSpeed, view.flow);
 
+    // 4d. The theme crossfade.
+    //
+    //     Also before the hit-stop return, and for the same reason: a four
+    //     second transition should not pause for 90ms because the player clipped
+    //     something. The fade is atmosphere, and atmosphere does not flinch.
+    const themeDirector = director?.current ?? null;
+    if (themeDirector !== null) {
+      engine.themeTargets.tunnel = refs.tunnel.current;
+      engine.themeTargets.lighting = refs.lighting.current;
+      themeDirector.update(delta, engine.themeTargets);
+      publishThemeDiagnostics(themeDirector);
+    }
+
     // 5. Feel. Decays trauma and the aberration pulse, and reports whether the
     //    picture is frozen this frame.
     const held = stepFeel(engine.feel, delta);
@@ -510,7 +602,25 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
     }
 
     // 7. Write transforms. Direct Object3D mutation, no React involved.
-    refs.tunnel.current?.update(view.distance, view.roll);
+    engine.renderTime += delta;
+    refs.tunnel.current?.update(view.distance, view.roll, engine.renderTime);
+
+    // The prop fields. Two of them: the theme being left and the one being
+    // entered. Outside a transition the outgoing field is at zero strength and
+    // draws nothing at all, because an instanced mesh with `count = 0` costs no
+    // draw call.
+    refs.propsOut.current?.update(
+      view.distance,
+      view.roll,
+      themeDirector?.outgoingProps ?? 0,
+      engine.renderTime,
+    );
+    refs.propsIn.current?.update(
+      view.distance,
+      view.roll,
+      themeDirector?.incomingProps ?? 1,
+      engine.renderTime,
+    );
     refs.entities.current?.update(sim.getState());
 
     const animation = animationForPhase(view.phase);
@@ -563,4 +673,68 @@ export function useGameLoop(refs: GameLoopRefs, options: GameLoopOptions): GameL
   });
 
   return engineRef;
+}
+
+/**
+ * What the theme system is doing this frame, on `window`.
+ *
+ * Exists for the P10 verify gate, which has to report a transition's real
+ * duration and which theme each measurement belongs to. There is no other way
+ * to ask: the crossfade is deliberately invisible to React, so a Playwright spec
+ * cannot read it off the DOM.
+ *
+ * One object, allocated once and mutated — this runs every frame.
+ */
+/** Placeholder until the first frame attaches the real director. */
+function noThemeDirector(): void {
+  /* no director yet */
+}
+
+const THEME_DIAGNOSTICS = {
+  slug: "",
+  incoming: "",
+  phase: "",
+  /** 0..1 through the current fade, or 1 when idle. */
+  t: 1,
+  /** Seconds since the current transition was requested. */
+  elapsed: 0,
+  /** Completed transitions this session. The gate waits on this changing. */
+  changes: 0,
+
+  /**
+   * Requests a transition, exactly as a milestone would.
+   *
+   * The P10 gate has to measure a real mid-run crossfade, and the first
+   * milestone is 1,200m — thirty-five seconds of flawless running that a
+   * headless browser on a software rasteriser will not survive. There is no
+   * other way to reach one.
+   *
+   * This ships. It is safe to ship for a reason stronger than obscurity: the
+   * theme director is presentation-only and has NO path into the sim. It cannot
+   * move the player, spawn an entity, award Flow or advance the RNG stream, so
+   * calling this changes what a run looks like and nothing about what it scores.
+   * A replay of the same seed is byte-identical with or without it. That is the
+   * same separation `ThemeDirector`'s header describes for Static's unlock.
+   */
+  request: noThemeDirector as (ordinal: number) => void,
+};
+
+interface ThemeDiagnosticsWindow extends Window {
+  __axisTheme?: typeof THEME_DIAGNOSTICS;
+}
+
+function publishThemeDiagnostics(themeDirector: ThemeDirector): void {
+  const d = THEME_DIAGNOSTICS;
+  if (d.slug !== themeDirector.current.slug) {
+    d.slug = themeDirector.current.slug;
+    d.changes += 1;
+  }
+  d.incoming = themeDirector.incoming.slug;
+  d.phase = themeDirector.state.phase;
+  d.t = themeDirector.state.t;
+  d.elapsed = themeDirector.state.elapsed;
+  d.request = (ordinal: number): void => {
+    themeDirector.requestTheme(ordinal);
+  };
+  (window as ThemeDiagnosticsWindow).__axisTheme = d;
 }

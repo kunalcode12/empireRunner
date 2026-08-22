@@ -24,24 +24,10 @@
  */
 
 import { TUNING } from "@/game/config/tuning";
-import { GREYBOX } from "../palette";
+import { PARTICLE_TINT } from "../theme/tints";
 import { spawnParticle, type ParticlePool } from "./ParticleSystem";
 
 const PT = TUNING.particles;
-
-/** Parses a palette hex into linear-ish 0..1 components, once at module load. */
-function rgb(hex: string): { r: number; g: number; b: number } {
-  const value = Number.parseInt(hex.slice(1), 16);
-  const BYTE = 255;
-  const RED_SHIFT = 16;
-  const GREEN_SHIFT = 8;
-  const MASK = 0xff;
-  return {
-    r: ((value >> RED_SHIFT) & MASK) / BYTE,
-    g: ((value >> GREEN_SHIFT) & MASK) / BYTE,
-    b: (value & MASK) / BYTE,
-  };
-}
 
 // Per-emitter variation ranges. Shape data for a burst, in the same spirit as
 // the pose curves: they describe what a puff looks like, not how the game plays.
@@ -62,10 +48,6 @@ const SHARD_LIFE_FACTOR = 1.5;
 const SHARD_SIZE_FACTOR = 1.2;
 const SHARD_COUNT = 18;
 const SHARD_SPEED = 0.9;
-
-const ASH = rgb(GREYBOX.ash);
-const BONE = rgb(GREYBOX.bone);
-const EMBER = rgb(GREYBOX.ember);
 
 const HALF = 0.5;
 
@@ -108,9 +90,9 @@ export function emitFootDust(pool: ParticlePool, x: number, y: number, z: number
       vz: -varied(BACKWARD),
       life: variedBy(PT.dustLife, DUST_LIFE_LO, DUST_LIFE_SPAN),
       size: variedBy(PT.dustSize, DUST_SIZE_LO, DUST_SIZE_SPAN),
-      r: ASH.r,
-      g: ASH.g,
-      b: ASH.b,
+      r: PARTICLE_TINT.dust.r,
+      g: PARTICLE_TINT.dust.g,
+      b: PARTICLE_TINT.dust.b,
       physical: false,
     });
   }
@@ -141,9 +123,9 @@ export function emitCoinBurst(pool: ParticlePool, x: number, y: number, z: numbe
       vz: (dz / length) * speed,
       life: variedBy(PT.coinLife, DUST_LIFE_LO, DUST_LIFE_SPAN),
       size: PT.coinSize,
-      r: BONE.r,
-      g: BONE.g,
-      b: BONE.b,
+      r: PARTICLE_TINT.coin.r,
+      g: PARTICLE_TINT.coin.g,
+      b: PARTICLE_TINT.coin.b,
       physical: true,
     });
   }
@@ -172,9 +154,9 @@ export function emitShatter(pool: ParticlePool, x: number, y: number, z: number)
       vz: (dz / length) * speed,
       life: variedBy(PT.shatterLife, SHATTER_LIFE_LO, SHATTER_LIFE_SPAN),
       size: variedBy(PT.shatterSize, HALF, 1),
-      r: EMBER.r,
-      g: EMBER.g,
-      b: EMBER.b,
+      r: PARTICLE_TINT.shatter.r,
+      g: PARTICLE_TINT.shatter.g,
+      b: PARTICLE_TINT.shatter.b,
       physical: true,
     });
   }
@@ -211,9 +193,9 @@ export function emitOverdriveTrail(
       vz: -TRAIL_BACKWARD,
       life: PT.trailLife,
       size: PT.trailSize,
-      r: EMBER.r,
-      g: EMBER.g,
-      b: EMBER.b,
+      r: PARTICLE_TINT.trail.r,
+      g: PARTICLE_TINT.trail.g,
+      b: PARTICLE_TINT.trail.b,
       physical: false,
     });
   }
@@ -245,9 +227,9 @@ export function emitFractureShards(pool: ParticlePool, x: number, y: number, z: 
       // Outlives the 1.2s window, so shards are still hanging when it resolves.
       life: TUNING.fracture.fractureWindow * SHARD_LIFE_FACTOR,
       size: PT.shatterSize * SHARD_SIZE_FACTOR,
-      r: BONE.r,
-      g: BONE.g,
-      b: BONE.b,
+      r: PARTICLE_TINT.coin.r,
+      g: PARTICLE_TINT.coin.g,
+      b: PARTICLE_TINT.coin.b,
       physical: false,
     });
   }

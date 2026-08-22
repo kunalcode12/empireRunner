@@ -34,6 +34,7 @@ import { Scene } from "./Scene";
 import { getQuality } from "./perf/quality";
 import type { EventListener } from "./events";
 import type { HudSink } from "./hud-sink";
+import type { ThemeSink } from "./theme-sink";
 import type { RunSummary } from "@/game/meta";
 import { LoadingScreen } from "@/ui/screens/LoadingScreen";
 
@@ -55,6 +56,12 @@ export interface GameCanvasProps {
   startingShards?: number;
   /** `title` renders the attract diorama instead of a playable run. */
   mode?: "play" | "title";
+  /** The DOM theme layer. Typed by `theme-sink.ts`, implemented in `src/ui/`. */
+  themeSink?: ThemeSink;
+  /** Theme slugs the player has unlocked. Static is the only locked one. */
+  unlockedThemes?: readonly string[];
+  /** Dev-only start theme, from `?theme=`. See `SceneProps.themeOverride`. */
+  themeOverride?: string | null;
 }
 
 const DEFAULT_SEED = 1;
@@ -67,6 +74,9 @@ export function GameCanvas({
   onRunEnd,
   startingShards,
   mode,
+  themeSink,
+  unlockedThemes,
+  themeOverride,
 }: GameCanvasProps): React.ReactElement {
   const quality = getQuality();
 
@@ -118,6 +128,9 @@ export function GameCanvas({
             onRunEnd={onRunEnd}
             startingShards={startingShards}
             mode={mode}
+            themeSink={themeSink}
+            unlockedThemes={unlockedThemes}
+            themeOverride={themeOverride}
           />
         </Canvas>
       </Suspense>

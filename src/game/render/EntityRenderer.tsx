@@ -36,7 +36,7 @@ import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
 import { EntityType } from "@/game/sim/level/entities";
 import type { EntityColumns, SimState } from "@/game/sim/state";
-import { OBSTACLE_COLOR, PICKUP_COLOR } from "./palette";
+import { ENTITY_TINT } from "./theme/tints";
 
 const PRISM_SIZE = TUNING.geometry.prismInnerSize;
 const LANE_WIDTH = TUNING.geometry.laneWidth;
@@ -207,11 +207,11 @@ export function EntityRenderer({ handleRef }: EntityRendererProps): React.ReactE
   }, []);
 
   const obstacleMaterial = useMemo(
-    () => new THREE.MeshLambertMaterial({ color: new THREE.Color(OBSTACLE_COLOR) }),
+    () => new THREE.MeshLambertMaterial({ color: ENTITY_TINT.obstacle }),
     [],
   );
   const pickupMaterial = useMemo(
-    () => new THREE.MeshLambertMaterial({ color: new THREE.Color(PICKUP_COLOR) }),
+    () => new THREE.MeshLambertMaterial({ color: ENTITY_TINT.pickup }),
     [],
   );
 

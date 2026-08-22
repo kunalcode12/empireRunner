@@ -27,7 +27,14 @@ import { expect, test } from "@playwright/test";
 const SIXTY_SECONDS_MS = 180_000;
 const SAMPLE_INTERVAL_MS = 250;
 
-interface PerfSample {
+/**
+ * The shape `DrawCallGuard` publishes on `window`.
+ *
+ * Declared here and only here: TypeScript merges `declare global` across every
+ * file in the program, so a second spec restating it is a hard error rather than
+ * a duplicate. `themes.spec.ts` imports this type.
+ */
+export interface PerfSample {
   particlePeak?: number;
   fps: number;
   minFps: number;
@@ -35,6 +42,14 @@ interface PerfSample {
   drawCalls: number;
   triangles: number;
   frames: number;
+  /** ms — worst single frame since load. Added at P10 for the theme gate. */
+  maxFrameMs: number;
+  /** Frames over `TUNING.budgets.transitionFrameMs`, after warm-up. */
+  hitches: number;
+  /** Live GPU resource counts from `renderer.info.memory`. */
+  textures: number;
+  geometries: number;
+  programs: number;
 }
 
 interface HeapSample {
@@ -42,9 +57,21 @@ interface HeapSample {
   supported: boolean;
 }
 
+/** What `useGameLoop` publishes about the theme crossfade. See that file. */
+export interface ThemeSample {
+  slug: string;
+  incoming: string;
+  phase: string;
+  t: number;
+  elapsed: number;
+  changes: number;
+  request(ordinal: number): void;
+}
+
 declare global {
   interface Window {
     __axisPerf?: PerfSample;
+    __axisTheme?: ThemeSample;
   }
 }
 

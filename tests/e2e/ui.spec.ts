@@ -193,7 +193,22 @@ for (const size of [
   { name: "375x812", viewport: MOBILE },
 ]) {
   test(`captures the death screen with a real settled run at ${size.name}`, async ({ page }) => {
-    test.setTimeout(240_000);
+    /*
+     * The longest budget in the suite, and it needs to be.
+     *
+     * This waits for a PASSIVE death — no input, just long enough for the
+     * generator to put a wall in front of a player who never dodges. On a real
+     * GPU that is a few seconds. Under Playwright's SwiftShader rasteriser at
+     * 1920x1080, with several workers competing for the same CPU, the canvas
+     * runs at a handful of frames a second and the same wall takes minutes to
+     * arrive.
+     *
+     * Raised at P10 after the full suite failed here while the identical test
+     * passed in isolation at 72s against a 120s wait — a contention flake, not a
+     * regression. The sim is on a fixed-60Hz accumulator, so the RUN still
+     * happens at the right rate; only the pictures are slow.
+     */
+    test.setTimeout(420_000);
     await page.setViewportSize(size.viewport);
     await boot(page);
 
@@ -201,7 +216,7 @@ for (const size of [
 
     // A passive player dies to real geometry as of P07, so this needs no input —
     // it just needs long enough for the generator to put a wall in front of them.
-    await expect(page.getByRole("button", { name: "RETRY" })).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByRole("button", { name: "RETRY" })).toBeVisible({ timeout: 300_000 });
     await page.waitForTimeout(1_200);
     await page.screenshot({
       path: `test-results/screens/${size.name}-death.png`,

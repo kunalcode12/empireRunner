@@ -35,7 +35,7 @@
 
 import { useEffect, useRef } from "react";
 import { TUNING } from "@/game/config/tuning";
-import { applyThemeOrdinal, setOverdrive as setRootOverdrive } from "../theme";
+import { setOverdrive as setRootOverdrive } from "../theme";
 import { createOdometer, type Odometer } from "./Odometer";
 import { createAxisRing, type AxisRing } from "./AxisRing";
 import { createFlowPopups, type FlowPopups } from "./FlowPopup";
@@ -61,7 +61,6 @@ export interface HudController {
   nearMiss(): void;
   setOverdrive(active: boolean): void;
   setFracture(state: { fraction: number; verb: number; shardCost: number } | null): void;
-  setTheme(ordinal: number): void;
   setPaused(paused: boolean): void;
   reset(): void;
 }
@@ -248,9 +247,6 @@ export function Hud({
       },
       setFracture(state) {
         fracture.set(state);
-      },
-      setTheme(ordinal) {
-        applyThemeOrdinal(ordinal);
       },
       setPaused(paused) {
         const root = rootRef.current;

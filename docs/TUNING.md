@@ -700,3 +700,112 @@ text-safe against which ground; the rest are **structural** and legal only as fi
 ink. Two themes cannot fill a second text role at all and declare `null` rather than shipping a
 4.19:1 label. Inside a raised plate the dim role resolves to the primary text colour: **a plate
 carries two inks, not three**, and hierarchy is carried by size, weight and tracking.
+
+---
+
+## 19. Themes — P10
+
+### 19.1 The crossfade
+
+| Key | Unit | Default | Status | Notes |
+|---|---|---|---|---|
+| `crossfadeSeconds` | s | **4.0** | ⚙️ | The transition tunnel is 120m of guaranteed-empty track (§10), which at the ~25 u/s mid-run speed is about 4.8s. The fade must finish inside that window or it bleeds into geometry the player has to answer. Under ~2s it reads as a cut; longer than the tunnel and it *is* a cut, because the tunnel ends before the fade does. Asserted in `tests/theme/crossfade.test.ts`. |
+| `musicSwapWindowStart` | × | **0.2** | ⚙️ | Music lands on a loop boundary, not on the visual clock, so it cannot be scheduled to arrive exactly with the palette. This is the window it may land in. |
+| `musicSwapWindowEnd` | × | **0.8** | ⚙️ | Outside the window a swap reads as either a premature cut or a late correction. |
+| `titleCardSeconds` | s | **2.2** | ⚙️ | **Shorter than the fade, deliberately.** The card is the cover the palette cut happens behind, not a receipt for it — it strikes when the transition is requested and leaves while the walls are still crossing. |
+| `propFadeOut` | × | **0.55** | ⚙️ | Fraction of the fade the outgoing prop set takes to clear. Under 1 so the sets *pass* rather than overlap: two furnished themes on screen at once reads as clutter. Asserted. |
+| `preloadAhead` | count | **1** | 🔒 | Themes warmed ahead of the one showing. The brief's rule, and why a transition never stalls — a 13KB bundle has a full minute of running to arrive in. |
+
+**The fade waits; it never cuts.** If the incoming bundle has not landed, the crossfade parks in
+`Waiting` with `t` at zero and starts late. An unfurnished tunnel for four seconds is worse than a
+transition that begins a beat after the milestone.
+
+### 19.2 Props
+
+| Key | Unit | Default | Status | Notes |
+|---|---|---|---|---|
+| `laneClearance` | u | **0.45** | 🔒 | **The number that makes "a prop can never be hit" true.** The player's widest extent on any face is `laneWidth * (laneCount - 1) / 2 + playerWidth / 2` = 2.55u, on every face after every roll. This puts the prop boundary at 3.0u. |
+| `depth` | u | **2.4** | ⚙️ | How far a prop may extend inward from its face, so nothing reads as spanning the play space. |
+| `maxPerSideHigh` | count | **48** | ⚙️ | Live prop slots per side. Mobile draws **fewer, not smaller** — a prop that shrinks with quality reads as the world receding wrongly. |
+| `maxPerSideMedium` | count | **32** | ⚙️ | |
+| `maxPerSideLow` | count | **14** | ⚙️ | |
+| `slotSpacing` | u | **7.0** | ⚙️ | Spacing along z. |
+| `slotJitter` | u | **2.6** | ⚙️ | Must stay under half the spacing or slots swap order and pop during recycling. |
+| `lodDistance` | u | **46.0** | ⚙️ | Beyond this a prop drops to its low LOD. Both LODs ship in the same bundle, so the swap costs no fetch. |
+| `cullDistance` | u | **78.0** | ⚙️ | Beyond this it is not submitted at all. Must exceed `lodDistance`, or the far mesh is never drawn and half of every bundle is dead weight. Asserted. |
+
+**The safety guarantee is structural, not careful.** A prop's anchor is offset outward by its own
+**measured** half-extent, so its *inner edge* — not its centre — lands at the clearance boundary.
+Anchoring the centre is what let a 2u panel drive a metre into the outer lane in the first draft.
+`tests/theme/props.test.ts` checks the inner edge exhaustively: every side × every slot at every
+quality tier × every archetype in every theme, against geometry built by the same builders the
+asset pipeline uses.
+
+**Props sit INSIDE the prism.** The first version put them beyond the wall, which was safe and
+invisible — the walls are opaque flat colour, so the whole layer rendered behind them and cost ten
+draw calls a frame to draw nothing.
+
+**Props are yawed a quarter turn.** A wall-mounted prop's width runs *along* the tunnel, the way a
+sign on a corridor wall does. Without it a 2u panel needs 2u of lateral room in a margin band that
+is 1.05u wide, and there is nowhere legal to put it.
+
+### 19.3 Budgets
+
+| Key | Unit | Default | Status | Notes |
+|---|---|---|---|---|
+| `initialPayloadBytes` | bytes | **4 MB** | 🔒 | First playable frame, gzipped, including fonts and the first theme's geometry. Enforced by `npm run check:payload` against the real build output. **Measured at 314 KB.** |
+| `themeBundleBytes` | bytes | **512 KB** | 🔒 | Per-theme geometry ceiling. The build fails, not warns. Measured: 10–14 KB each. |
+| `transitionFrameMs` | ms | **32** | ⚙️ | A frame longer than this during a crossfade counts as a hitch. Half a frame at 60Hz. See the note in `tests/e2e/themes.spec.ts` for why this is only meaningful as a **rate delta** under a software rasteriser. |
+
+### 19.4 Surface effect strengths are LINEAR-space mix fractions
+
+This is the single most counter-intuitive number in the theme system, so it is written down.
+
+three works in linear space. Kiln's gunmetal `#2B2B2F` is **0.027** linear; its ember `#E4572E` is
+**0.77**. Mixing 22% of the way from one to the other lands at 0.19 linear, which is sRGB **0.48**
+against a 0.17 plate — an apparently 50% blend. The first draft *added* the effect instead of
+mixing it, which was worse still: adding 7% of linear ember to 0.027 triples the red channel, and
+`effectStrength: 0.07` rendered the walls as a lava lamp.
+
+So the shipped values are small, and they are mix fractions bounded between two palette colours:
+
+| Theme | Effect | `effectStrength` | `effectSteps` |
+|---|---|---|---|
+| Kiln | Shimmer | 0.05 | 4 |
+| Undertow | Caustics | 0.09 | 3 |
+| Bazaar | Drift | 0.06 | 4 |
+| Static | Scan | 0.14 | 3 |
+
+Mixing rather than adding is also what keeps §11.3 satisfiable by construction: the result always
+lies **between two palette colours**, which is a stronger guarantee than clamping an additive term.
+`effectSteps` is capped at 3–4 and asserted — §11.1 requires any unavoidable gradient be
+"posterised into 3-4 hard steps", and §10 names Undertow's caustics as bands specifically.
+
+---
+
+## 20. Themes — the registry's own invariants
+
+Everything below is asserted in `tests/theme/registry.test.ts` against the registry, by iterating
+it rather than by restating it. That is what keeps them true for a fifth theme.
+
+| Invariant | Why |
+|---|---|
+| Palette is 4–6 flat colours, including the key-line, no duplicates | §11.1's cap. A sixth colour turns a screen-print into an illustration. |
+| Every UI role and every surface, prop and particle colour is **in the palette** | A theme is its palette. A colour that is not in it is a colour nobody chose. |
+| `text` clears 4.5:1 on **both** ground and surface | It is the one colour promised legible everywhere. |
+| `textDim` clears 4.5:1 on the ground **or is `null`** | Two themes have no second text-safe colour and say so, rather than shipping a 3.5:1 label. |
+| `accentOnSurface` is **measured, not declared** | Kiln's ember is 3.83:1 on gunmetal and Bazaar's ochre 4.19:1 on indigo — near misses nobody catches by eye. |
+| **No prop uses the theme's accent** | The accent is the obstacle colour; `render/theme/tints.ts` derives it from that field. This caught Bazaar shipping an ochre awning and an ochre spice sack — both the exact colour of a hazard. |
+| `fog.far` exceeds `minReactionTime * maxSpeed` = 18.7u, unstable bounds included | A theme may be unfair. It may not be unreadable. Static's `unstableMin` of 20u is the binding value in the game, clearing the floor by 1.3u. |
+| Fog is never darker than the palette's darkest colour | §11.3. The fog **is** the background — the scene keeps them equal so the tunnel has no visible end. |
+| No accent, text or effect colour is neon magenta | §11.3 bans `#FF00FF` and neighbours as a primary or accent. Checked by hue distance and saturation, so Static's deep crimson bleed `#9B2247` passes on its merits rather than on an argument. |
+| Exactly one theme has unstable fog, and it is the locked one | §10. |
+| Ambient drift signs differ across themes | Kiln's sparks fall, Undertow's debris rises, Bazaar's dust hangs, Static has none. The fastest read on which place you are in. |
+| Every theme object is frozen, all the way down | A theme is data. |
+
+**Bazaar's fog is the only LIGHT one, and it has to be.** §10 calls it "bright, thin, 70u — the
+longest sightlines", and every other theme fades toward a near-black. Copying that pattern here put
+a black rectangle at the vanishing point of the one theme whose entire design point is seeing a
+long way; it read as the tunnel ending in a doorway. §11.3 bans a background *darker* than the
+palette's darkest colour and says nothing about lighter, because a lighter background is haze — and
+haze is what a sun-bleached exterior actually does.

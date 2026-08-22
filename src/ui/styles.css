@@ -1552,6 +1552,135 @@
   text-align: center;
 }
 
+/* ─── Theme card ─────────────────────────────────────────────────────────────
+ *
+ * The signpost struck across the frame when the run enters a new place, and the
+ * cover the palette cut happens behind. Three beats, driven from `data-phase`:
+ *
+ *   strike  a band wipes in from the left, hard-edged
+ *   hold    full cover; `applyTheme` fires on this boundary
+ *   leave   it wipes off to the right
+ *
+ * A WIPE and not a fade, for the same reason everything else here is: §11.1
+ * bans soft gradients, and an opacity ramp on a full-bleed band is the largest
+ * possible one. `clip-path` with an inset also costs no paint of its own.
+ */
+
+.axis-theme-card {
+  position: fixed;
+  inset: auto 0 22%;
+  z-index: var(--axis-z-theme-card);
+  display: grid;
+  gap: var(--axis-space-2);
+  padding: var(--axis-space-5) var(--axis-safe-left) var(--axis-space-5) var(--axis-safe-left);
+  background: var(--axis-ground);
+  border-block: var(--axis-keyline-heavy) solid var(--axis-accent);
+  text-align: center;
+  pointer-events: none;
+  /* Fully clipped away. `display: none` would forfeit the wipe entirely, and
+     `visibility` inherits into the children the way it did to the HUD at P14. */
+  clip-path: inset(0 100% 0 0);
+}
+
+.axis-theme-card[data-phase="strike"] {
+  animation: axis-theme-strike var(--axis-motion-screen) var(--axis-ease-out) forwards;
+}
+
+.axis-theme-card[data-phase="hold"] {
+  clip-path: inset(0 0 0 0);
+}
+
+.axis-theme-card[data-phase="leave"] {
+  animation: axis-theme-leave var(--axis-motion-screen) var(--axis-ease-out) forwards;
+}
+
+@keyframes axis-theme-strike {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes axis-theme-leave {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+.axis-theme-card-name {
+  font-family: var(--axis-font-display);
+  font-size: var(--axis-type-display-l);
+  line-height: 1;
+  letter-spacing: var(--axis-track-display);
+  text-transform: uppercase;
+  color: var(--axis-accent);
+}
+
+.axis-theme-card-blurb {
+  font-family: var(--axis-font-body);
+  font-size: var(--axis-type-body);
+  line-height: 1.4;
+  color: var(--axis-text);
+}
+
+/*
+ * Reduced motion keeps the card and drops the wipe.
+ *
+ * The card is not decoration — it is what covers the palette cut. Removing it
+ * would expose the one frame the whole mechanism exists to hide, so the
+ * animation goes and the cover stays.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .axis-theme-card[data-phase="strike"],
+  .axis-theme-card[data-phase="hold"] {
+    animation: none;
+    clip-path: inset(0 0 0 0);
+  }
+
+  .axis-theme-card[data-phase="leave"] {
+    animation: none;
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+/* ─── Theme load bar ─────────────────────────────────────────────────────────
+ *
+ * Byte-accurate, from the manifest the asset pipeline wrote. It stalls when the
+ * network stalls — which is the only honest reason to show a bar.
+ */
+
+.axis-theme-load {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: var(--axis-z-screen);
+  height: var(--axis-keyline-heavy);
+  background: var(--axis-structural);
+  pointer-events: none;
+}
+
+.axis-theme-load[data-done="1"] {
+  display: none;
+}
+
+.axis-theme-load-bar {
+  height: 100%;
+  background: var(--axis-accent);
+  /* Short, and eased out: the bar must never appear to move on its own, so the
+     tween only smooths the step between two real byte counts. */
+  transition: width var(--axis-motion-fast) var(--axis-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .axis-theme-load-bar {
+    transition: none;
+  }
+}
+
 /* ─── Mobile — designed and tested at 375px ─────────────────────────────── */
 
 @media (max-width: 720px) {

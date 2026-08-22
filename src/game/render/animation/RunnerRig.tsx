@@ -31,7 +31,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
 import { AnimationState, type AnimationStateValue } from "../interpolate";
-import { PLAYER_COLOR } from "../palette";
+import { ENTITY_TINT } from "../theme/tints";
 import { createSquash, horizontalScale, land, stepSquash, verticalScale } from "../feel/squash";
 import { createBlend, setState, stepBlend } from "./blend";
 import {
@@ -143,10 +143,7 @@ export function RunnerRig({ handleRef }: RunnerRigProps): React.ReactElement {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
   const geometry = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
-  const material = useMemo(
-    () => new THREE.MeshLambertMaterial({ color: new THREE.Color(PLAYER_COLOR) }),
-    [],
-  );
+  const material = useMemo(() => new THREE.MeshLambertMaterial({ color: ENTITY_TINT.player }), []);
 
   useLayoutEffect(() => {
     const g = geometry;

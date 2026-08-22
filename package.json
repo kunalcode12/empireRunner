@@ -14,7 +14,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "analyze": "next experimental-analyze"
+    "analyze": "next experimental-analyze",
+    "build:themes": "node --import ./scripts/lib/ts-register.mjs scripts/build-themes.mjs",
+    "check:payload": "node scripts/check-payload.mjs",
+    "prebuild": "npm run build:themes"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -32,6 +35,9 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.4.2",
+    "@gltf-transform/extensions": "^4.4.2",
+    "@gltf-transform/functions": "^4.4.2",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -40,6 +46,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "leva": "^0.10.1",
+    "meshoptimizer": "^1.2.0",
     "prettier": "^3.9.6",
     "r3f-perf": "^7.2.3",
     "tailwindcss": "^4",

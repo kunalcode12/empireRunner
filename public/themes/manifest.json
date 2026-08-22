@@ -1,0 +1,57 @@
+{
+  "themes": {
+    "kiln": {
+      "files": {
+        "desktop": {
+          "name": "kiln.glb",
+          "bytes": 13080
+        },
+        "mobile": {
+          "name": "kiln.low.glb",
+          "bytes": 12024
+        }
+      },
+      "props": 5
+    },
+    "undertow": {
+      "files": {
+        "desktop": {
+          "name": "undertow.glb",
+          "bytes": 13372
+        },
+        "mobile": {
+          "name": "undertow.low.glb",
+          "bytes": 12312
+        }
+      },
+      "props": 5
+    },
+    "bazaar": {
+      "files": {
+        "desktop": {
+          "name": "bazaar.glb",
+          "bytes": 11080
+        },
+        "mobile": {
+          "name": "bazaar.low.glb",
+          "bytes": 10324
+        }
+      },
+      "props": 6
+    },
+    "static": {
+      "files": {
+        "desktop": {
+          "name": "static.glb",
+          "bytes": 13264
+        },
+        "mobile": {
+          "name": "static.low.glb",
+          "bytes": 12208
+        }
+      },
+      "props": 5
+    }
+  },
+  "generatedAt": "2026-08-22T13:56:22.445Z"
+}

@@ -34,7 +34,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
-import { GREYBOX } from "../palette";
+import { ENTITY_TINT } from "../theme/tints";
 import { getMotion } from "./reducedMotion";
 import { saturate } from "../interpolate";
 
@@ -65,7 +65,7 @@ export function SpeedLines({ handleRef }: SpeedLinesProps): React.ReactElement {
   const material = useMemo(
     () =>
       new THREE.MeshBasicMaterial({
-        color: new THREE.Color(GREYBOX.bone),
+        color: ENTITY_TINT.speedLine,
         transparent: true,
         opacity: 0,
         depthWrite: false,

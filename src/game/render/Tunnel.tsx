@@ -27,12 +27,26 @@
  * individually would need four correct rotations per frame and would let them
  * drift out of alignment by a float epsilon, which shows up as hairline seams at
  * the corners.
+ *
+ * ## Themed at P10
+ *
+ * The materials come from `materials/screenprint.ts` and carry the active
+ * theme's fill, ink, halftone, seams and animated surface term. A crossfade
+ * blends the parameters in place rather than swapping materials, because
+ * swapping would recompile a shader mid-transition — which is exactly the frame
+ * hitch the transition budget exists to catch.
  */
 
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { TUNING } from "@/game/config/tuning";
-import { FACE_COLORS } from "./palette";
+import type { Theme } from "@/game/config/themes";
+import {
+  blendScreenPrint,
+  createScreenPrintMaterial,
+  updateScreenPrint,
+  type ScreenPrintMaterial,
+} from "./materials/screenprint";
 import { getQuality } from "./perf/quality";
 
 const FACE_COUNT = TUNING.geometry.faceCount;
@@ -45,23 +59,6 @@ const QUARTER_TURN = Math.PI / 2;
 /** Face 0 is the floor — the one surface that receives the player's shadow. */
 const FLOOR_FACE = 0;
 
-/**
- * One face's placement within the prism cross-section.
- *
- * Face 0 is the floor and the others follow the sim's convention that rolling
- * `+1` steps to the next face index. Each is a plane rotated to face inward and
- * pushed out to the prism wall.
- */
-interface FacePlacement {
-  /** rad — rotation about the tunnel axis. */
-  roll: number;
-}
-
-const FACE_PLACEMENTS: readonly FacePlacement[] = Array.from(
-  { length: FACE_COUNT },
-  (_unused, face) => ({ roll: face * QUARTER_TURN }),
-);
-
 export interface TunnelHandle {
   /** The group whose rotation carries the world roll. */
   group: THREE.Group | null;
@@ -71,11 +68,21 @@ export interface TunnelHandle {
    * Called from `useGameLoop` every frame with interpolated values. Never reads
    * sim state itself — it is handed presentation values and nothing else.
    */
-  update(distance: number, roll: number): void;
+  update(distance: number, roll: number, time: number): void;
+  /**
+   * Blends the surface toward another theme.
+   *
+   * `t` of 0 is entirely `from`, 1 entirely `to`. Called every frame of a
+   * transition and once at the end with `t = 1`, so the resting state is always
+   * exactly the destination rather than 0.999 of it.
+   */
+  blend(from: Theme, to: Theme, t: number): void;
 }
 
 export interface TunnelProps {
   handleRef: React.MutableRefObject<TunnelHandle | null>;
+  /** The theme the tunnel is built for. Changing it rebuilds the materials. */
+  theme: Theme;
 }
 
 /**
@@ -86,7 +93,7 @@ export interface TunnelProps {
  * (docs/ARCHITECTURE.md §3.1). The component renders once and the loop mutates
  * the instance matrices directly.
  */
-export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
+export function Tunnel({ handleRef, theme }: TunnelProps): React.ReactElement {
   const groupRef = useRef<THREE.Group>(null);
   const meshRefs = useRef<(THREE.InstancedMesh | null)[]>([]);
 
@@ -115,25 +122,21 @@ export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
    * active theme's palette") and a legibility problem: the prism stopped reading
    * as a four-sided space at all.
    *
-   * `MeshBasicMaterial` renders the palette colour exactly, with no shading
-   * term, so a wall can never be darker than the swatch it was given. That is
-   * also §11.1 verbatim — "every surface is one flat colour", "no gradient
-   * ramps" — so the unlit path is the art direction rather than a workaround.
+   * An unlit face renders its palette colour exactly, with no shading term, so a
+   * wall can never be darker than the swatch it was given. That is also §11.1
+   * verbatim — "every surface is one flat colour", "no gradient ramps".
    *
-   * The FLOOR stays Lambert for one reason: `MeshBasicMaterial` cannot receive
-   * shadows, and the player's contact shadow is the only depth cue the grey-box
-   * has. Ash is light enough that shading it does not crush.
+   * The FLOOR stays lit for one reason: an unlit material cannot receive
+   * shadows, and the player's contact shadow is the only depth cue the geometry
+   * has. Every theme's floor colour is chosen light enough to survive shading.
    */
-  const materials = useMemo(
-    () =>
-      FACE_COLORS.map((color, face) => {
-        const common = { color: new THREE.Color(color), side: THREE.FrontSide };
-        return face === FLOOR_FACE
-          ? new THREE.MeshLambertMaterial(common)
-          : new THREE.MeshBasicMaterial(common);
-      }),
-    [],
-  );
+  const materials = useMemo(() => {
+    return Array.from({ length: FACE_COUNT }, (_unused, face) => {
+      const lit = face === FLOOR_FACE;
+      const color = lit ? theme.surface.floor : theme.surface.wall;
+      return createScreenPrintMaterial(color, theme.surface, lit);
+    });
+  }, [theme]);
 
   useLayoutEffect(() => {
     const geo = geometry;
@@ -155,18 +158,24 @@ export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
       quaternion: new THREE.Quaternion(),
       scale: new THREE.Vector3(1, 1, 1),
       axis: new THREE.Vector3(0, 0, 1),
+      fromColor: new THREE.Color(),
+      toColor: new THREE.Color(),
     }),
     [],
   );
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const handle: TunnelHandle = {
       group: groupRef.current,
 
-      update(distance: number, roll: number): void {
+      update(distance: number, roll: number, time: number): void {
         const group = groupRef.current;
         if (group !== null) {
           group.rotation.z = roll;
+        }
+
+        for (const material of materials) {
+          updateScreenPrint(material, time, distance);
         }
 
         // Where the tunnel has scrolled to, wrapped into one segment. Wrapping
@@ -180,8 +189,7 @@ export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
             continue;
           }
 
-          const placement = FACE_PLACEMENTS[face] ?? FACE_PLACEMENTS[0];
-          scratch.quaternion.setFromAxisAngle(scratch.axis, placement?.roll ?? 0);
+          scratch.quaternion.setFromAxisAngle(scratch.axis, face * QUARTER_TURN);
 
           for (let i = 0; i < segmentCount; i += 1) {
             // Segment i sits i lengths ahead, minus the scroll, then wrapped so
@@ -203,27 +211,47 @@ export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
           mesh.instanceMatrix.needsUpdate = true;
         }
       },
+
+      blend(from: Theme, to: Theme, t: number): void {
+        for (let face = 0; face < FACE_COUNT; face += 1) {
+          const material = materials[face];
+          if (material === undefined) {
+            continue;
+          }
+          const lit = face === FLOOR_FACE;
+          scratch.fromColor.set(lit ? from.surface.floor : from.surface.wall);
+          scratch.toColor.set(lit ? to.surface.floor : to.surface.wall);
+          blendScreenPrint(
+            material,
+            from.surface,
+            to.surface,
+            scratch.fromColor,
+            scratch.toColor,
+            t,
+          );
+        }
+      },
     };
 
     handleRef.current = handle;
     // Prime it so the first rendered frame is already in position rather than
     // showing every instance stacked at the origin.
-    handle.update(0, 0);
+    handle.update(0, 0, 0);
 
     return () => {
       handleRef.current = null;
     };
-  }, [handleRef, scratch, segmentCount]);
+  }, [handleRef, scratch, segmentCount, materials]);
 
   return (
     <group ref={groupRef} name="tunnel-roll">
-      {FACE_COLORS.map((_, face) => (
+      {materials.map((material, face) => (
         <instancedMesh
           key={face}
           ref={(mesh) => {
             meshRefs.current[face] = mesh;
           }}
-          args={[geometry, materials[face], segmentCount]}
+          args={[geometry, material, segmentCount]}
           receiveShadow
           frustumCulled={false}
           name={`tunnel-face-${face}`}
@@ -235,3 +263,6 @@ export function Tunnel({ handleRef }: TunnelProps): React.ReactElement {
 
 /** Draw calls the tunnel costs: one per face, independent of segment count. */
 export const TUNNEL_DRAW_CALLS = FACE_COUNT;
+
+/** Materials the tunnel builds. Exported so the director can size its blends. */
+export type TunnelMaterials = readonly ScreenPrintMaterial[];

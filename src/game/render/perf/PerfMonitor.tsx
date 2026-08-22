@@ -30,6 +30,9 @@
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { getQuality } from "./quality";
+import { TUNING } from "@/game/config/tuning";
+
+const MS_PER_SECOND = 1000;
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -43,6 +46,33 @@ export interface FrameStats {
   drawCalls: number;
   triangles: number;
   frames: number;
+
+  /*
+   * Added at P10, for the theme gate.
+   *
+   * The brief asks whether a transition hitches, and an average cannot answer
+   * that — a four-second crossfade that drops one 90ms frame still averages
+   * 58fps. So the worst single frame is recorded, and every frame over the
+   * budget is counted.
+   */
+
+  /** ms — the longest single frame since the last reset. */
+  maxFrameMs: number;
+  /** Frames longer than `TUNING.budgets.transitionFrameMs`, after warm-up. */
+  hitches: number;
+  /**
+   * Live GPU resources, from `renderer.info.memory`.
+   *
+   * three does not report texture BYTES and cannot: it does not know the
+   * internal format the driver chose. The count is what it has, and for AXIS it
+   * is the meaningful figure anyway — the themes ship no texture files at all
+   * (§11.1 is flat colour plus a screen-space halftone computed in the shader),
+   * so anything here is three's own defaults.
+   */
+  textures: number;
+  geometries: number;
+  /** Compiled shader programs. One per theme surface variant, plus the rigs. */
+  programs: number;
 }
 
 /**
@@ -64,6 +94,11 @@ export function useFrameStats(): React.MutableRefObject<FrameStats> {
     drawCalls: 0,
     triangles: 0,
     frames: 0,
+    maxFrameMs: 0,
+    hitches: 0,
+    textures: 0,
+    geometries: 0,
+    programs: 0,
   });
 
   const acc = useRef({ elapsed: 0, samples: 0, fpsSum: 0 });
@@ -87,12 +122,26 @@ export function useFrameStats(): React.MutableRefObject<FrameStats> {
       if (a.elapsed > WARMUP_SECONDS && fps < s.minFps) {
         s.minFps = fps;
       }
+
+      // Same warm-up exclusion, same reason: the first second is compilation.
+      const frameMs = delta * MS_PER_SECOND;
+      if (a.elapsed > WARMUP_SECONDS) {
+        if (frameMs > s.maxFrameMs) {
+          s.maxFrameMs = frameMs;
+        }
+        if (frameMs > TUNING.budgets.transitionFrameMs) {
+          s.hitches += 1;
+        }
+      }
       s.avgFps = a.fpsSum / a.samples;
     }
 
     s.drawCalls = gl.info.render.calls;
     s.triangles = gl.info.render.triangles;
     s.particlePeak = particlePeakRef.current;
+    s.textures = gl.info.memory.textures;
+    s.geometries = gl.info.memory.geometries;
+    s.programs = gl.info.programs?.length ?? 0;
   });
 
   return stats;

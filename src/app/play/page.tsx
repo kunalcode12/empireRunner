@@ -42,13 +42,16 @@
  */
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RunSummary } from "@/game/meta";
 import { LoadingScreen } from "@/ui/screens/LoadingScreen";
 import { Halftone } from "@/ui/components/Halftone";
 import { CommitCounter, countRender, markRenderCheckpoint } from "@/ui/CommitCounter";
 import { resetTheme } from "@/ui/theme";
 import { Hud, type HudController } from "@/ui/hud/Hud";
+import { ThemeStage, type ThemeStageController } from "@/ui/ThemeStage";
+import { isUnlocked, Unlockable } from "@/game/meta";
+import { THEME_SLUGS } from "@/game/config/themes";
 import { Router } from "@/ui/transition/Router";
 import { TitleScreen } from "@/ui/screens/TitleScreen";
 import { DeathScreen } from "@/ui/screens/DeathScreen";
@@ -77,6 +80,7 @@ export default function PlayPage(): React.ReactElement {
   const hydrate = useMetaStore((state) => state.hydrate);
   const ready = useMetaStore((state) => state.ready);
   const shards = useMetaStore((state) => state.balances.shards);
+  const lifetime = useMetaStore((state) => state.lifetime);
 
   const [summary, setSummary] = useState<RunSummary | null>(null);
 
@@ -90,6 +94,29 @@ export default function PlayPage(): React.ReactElement {
   const [hud, setHud] = useState<HudController | null>(null);
   const onHudReady = useCallback((controller: HudController | null) => {
     setHud(controller);
+  }, []);
+
+  // The theme layer's controller, by the same route and for the same reason.
+  const [themeStage, setThemeStage] = useState<ThemeStageController | null>(null);
+  const onThemeStageReady = useCallback((controller: ThemeStageController | null) => {
+    setThemeStage(controller);
+  }, []);
+
+  /*
+   * The first theme blocks the first run — the brief's rule, item 6.
+   *
+   * It starts downloading with the title diorama (see `ThemePreload` in
+   * `Scene.tsx`), so by the time anyone has read the menu it is almost always
+   * already resident and this gate is invisible. When it is not — a cold cache
+   * on a slow connection — the run waits behind a real progress bar rather than
+   * starting in an unfurnished tunnel and popping props in a second later.
+   *
+   * One `setState`, once per session, on the title screen. It cannot fire during
+   * a run, so the zero-renders-during-a-run budget is untouched.
+   */
+  const [themeLoaded, setThemeLoaded] = useState(false);
+  const onFirstThemeLoaded = useCallback(() => {
+    setThemeLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -157,8 +184,38 @@ export default function PlayPage(): React.ReactElement {
     [go],
   );
 
-  const paused = screen !== Screen.Run;
+  // Not just "a menu is open": a run also stays suspended until the theme it is
+  // about to draw is on the machine.
+  const paused = screen !== Screen.Run || !themeLoaded;
   const isTitle = screen === Screen.Title;
+
+  /*
+   * Which themes the run is allowed to visit.
+   *
+   * Resolved HERE, not in the sim and not in the render layer. The sim's
+   * milestone schedule is identical for every player — that is law (a) — so the
+   * unlock is a presentation filter applied on top of it, and this is the only
+   * layer that can see both the save and the canvas.
+   */
+  const unlockedThemes = useMemo(() => {
+    const playable = THEME_SLUGS.filter((slug) => slug !== "static");
+    return isUnlocked(Unlockable.StaticTheme, lifetime) ? THEME_SLUGS : playable;
+  }, [lifetime]);
+
+  /*
+   * Dev-only theme override, read once from the query string.
+   *
+   * The verify gate has to photograph all four themes in one session and Static
+   * is a 5,000m unlock — roughly two and a half minutes of flawless running per
+   * attempt. Read once at mount rather than through `useSearchParams` so it
+   * cannot re-render mid-run, and it changes nothing the sim can observe.
+   */
+  const [themeOverride] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return new URLSearchParams(window.location.search).get("theme");
+  });
 
   function renderScreen(current: ScreenName): React.ReactNode {
     switch (current) {
@@ -211,6 +268,9 @@ export default function PlayPage(): React.ReactElement {
           // The seam. `HudController` and `HudSink` are structurally identical
           // and this line is where the compiler proves it.
           hud={hud ?? undefined}
+          themeSink={themeStage ?? undefined}
+          unlockedThemes={unlockedThemes}
+          themeOverride={themeOverride}
           onRunEnd={onRunEnd}
         />
 
@@ -231,12 +291,19 @@ export default function PlayPage(): React.ReactElement {
           }}
         />
 
+        {/* The theme card, the palette cut it hides, and the byte-accurate load
+            bar. Inside the counter because the card is on screen during a run. */}
+        <ThemeStage onReady={onThemeStageReady} onFirstThemeLoaded={onFirstThemeLoaded} />
+
         <Router render={renderScreen} />
       </CommitCounter>
 
       <Halftone />
 
       {!ready && <LoadingScreen detail="Reading your save" />}
+
+      {/* The blocking half of item 6. Only ever seen on a cold cache. */}
+      {ready && running && !themeLoaded && <LoadingScreen detail="Building the tunnel" />}
     </main>
   );
 }
